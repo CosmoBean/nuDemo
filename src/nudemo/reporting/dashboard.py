@@ -3,9 +3,17 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import mean
 
 from nudemo.benchmarks.export import load_report
-from nudemo.benchmarks.models import BenchmarkReport
+from nudemo.benchmarks.models import BenchmarkReport, BenchmarkResult
+
+__all__ = [
+    "DashboardApp",
+    "build_dashboard_html",
+    "build_recommendation_summary",
+    "load_results",
+]
 
 
 def load_results(results_path: str | Path) -> list[dict[str, object]]:
@@ -16,109 +24,33 @@ def load_results(results_path: str | Path) -> list[dict[str, object]]:
         return payload
     if isinstance(payload, dict) and "results" in payload:
         report = BenchmarkReport.from_dict(payload)
-        return [
-            {
-                "backend": result.backend,
-                "pattern": result.pattern,
-                **result.metrics,
-                **{f"meta_{key}": value for key, value in result.metadata.items()},
-            }
-            for result in report.results
-        ]
+        return [_flatten_result(result) for result in report.results]
     raise ValueError(f"Unsupported results payload in {path}")
-
-
-def build_app(results_path: str | Path):
-    import plotly.express as px
-    from dash import Dash, Input, Output, dcc, html
-
-    rows = load_results(results_path)
-    app = Dash(__name__)
-    backends = sorted({row["backend"] for row in rows})
-    patterns = sorted({row["pattern"] for row in rows})
-
-    app.layout = html.Div(
-        [
-            html.H1("nuDemo Benchmark Dashboard"),
-            html.P("Storage and access-pattern comparison for the nuScenes pipeline scaffold."),
-            dcc.Dropdown(
-                id="pattern-dropdown",
-                options=[{"label": pattern, "value": pattern} for pattern in patterns],
-                value=patterns[0] if patterns else None,
-                clearable=False,
-            ),
-            dcc.Graph(id="metric-chart"),
-            dcc.Graph(
-                id="pattern-heatmap",
-                figure=_build_heatmap(rows, backends, patterns),
-            ),
-        ]
-    )
-
-    @app.callback(Output("metric-chart", "figure"), Input("pattern-dropdown", "value"))
-    def update_chart(selected_pattern: str):
-        filtered = [row for row in rows if row["pattern"] == selected_pattern]
-        if not filtered:
-            return px.bar(title=f"No rows found for {selected_pattern}")
-        metric_keys = [
-            key
-            for key in filtered[0].keys()
-            if key not in {"backend", "pattern"}
-            and isinstance(filtered[0][key], int | float)
-        ]
-        metric = metric_keys[0] if metric_keys else None
-        if not metric:
-            return px.bar(title=f"No numeric metrics for {selected_pattern}")
-        return px.bar(
-            filtered,
-            x="backend",
-            y=metric,
-            color="backend",
-            title=f"{selected_pattern}: {metric}",
-        )
-
-    return app
-
-
-def _build_heatmap(rows: list[dict[str, object]], backends: list[str], patterns: list[str]):
-    import plotly.graph_objects as go
-
-    values = []
-    for backend in backends:
-        row_values = []
-        for pattern in patterns:
-            match = next(
-                (
-                    item
-                    for item in rows
-                    if item["backend"] == backend and item["pattern"] == pattern
-                ),
-                None,
-            )
-            numeric_values = [
-                value
-                for key, value in (match or {}).items()
-                if key not in {"backend", "pattern"} and isinstance(value, int | float)
-            ]
-            row_values.append(float(numeric_values[0]) if numeric_values else 0.0)
-        values.append(row_values)
-    return go.Figure(
-        data=go.Heatmap(z=values, x=patterns, y=backends, colorscale="Viridis"),
-        layout={"title": "Access Pattern Heatmap"},
-    )
-
-
-def main(results_path: str | Path) -> int:
-    app = build_app(results_path)
-    app.run(debug=False)
-    return 0
 
 
 def build_recommendation_summary(report: BenchmarkReport) -> dict[str, str]:
     training = report.best_result("dataloader", "throughput_samples_per_sec", high_is_better=True)
+    if training is None:
+        training = report.best_result("sequential_scan", "throughput_mean", high_is_better=True)
     random_access = report.best_result("random_access", "latency_p50_ms", high_is_better=False)
     curation = report.best_result("curation_query", "query_time_ms", high_is_better=False)
+    if curation is None:
+        curation = report.best_result("curation_query", "query_time_ms_mean", high_is_better=False)
+    ingestion = _best_stage_candidate(
+        report,
+        stage="ingestion",
+        preferred_metrics=("throughput_msg_sec", "throughput_mb_sec"),
+        high_is_better=True,
+    )
+    storage = _best_stage_candidate(
+        report,
+        stage="storage",
+        preferred_metrics=("throughput_samples_per_sec", "throughput"),
+        high_is_better=True,
+    )
     return {
+        "ingestion": ingestion.backend if ingestion else "N/A",
+        "storage": storage.backend if storage else "N/A",
         "training": training.backend if training else "N/A",
         "random_access": random_access.backend if random_access else "N/A",
         "curation": curation.backend if curation else "N/A",
@@ -127,25 +59,220 @@ def build_recommendation_summary(report: BenchmarkReport) -> dict[str, str]:
 
 def build_dashboard_html(report: BenchmarkReport) -> str:
     recommendations = build_recommendation_summary(report)
-    rows = "".join(
-        f"<tr><td>{result.backend}</td><td>{result.pattern}</td><td>{result.metrics}</td></tr>"
-        for result in report.results
+    summary_cards = _build_summary_cards(report)
+    stage_table = _build_stage_table(report)
+    dataloader_table = _build_dataloader_table(report)
+    result_rows = "".join(_build_result_row(result) for result in report.results)
+    recommendation_rows = "".join(
+        f"<tr><th>{stage}</th><td>{backend}</td></tr>"
+        for stage, backend in recommendations.items()
+    )
+    sample_rows = "".join(
+        _build_sample_row(result) for result in report.results[:8]
     )
     return f"""
     <html>
+      <head>
+        <style>
+          body {{ font-family: sans-serif; margin: 32px; color: #1f2937; }}
+          h1, h2 {{ margin-bottom: 12px; }}
+          .cards {{
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            margin: 16px 0 24px;
+          }}
+          .card {{
+            border: 1px solid #d1d5db;
+            border-radius: 12px;
+            padding: 16px;
+            background: #f9fafb;
+          }}
+          table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0 24px;
+          }}
+          th, td {{
+            border: 1px solid #e5e7eb;
+            padding: 8px 10px;
+            text-align: left;
+            vertical-align: top;
+          }}
+          th {{ background: #f3f4f6; }}
+          .muted {{ color: #6b7280; }}
+        </style>
+      </head>
       <body>
         <h1>{report.suite_name}</h1>
+        <p class="muted">
+          Created at {_report_created_at(report)}. Dataset summary: {report.dataset}.
+        </p>
+        <div class="cards">{summary_cards}</div>
         <h2>Recommendation Summary</h2>
-        <p>training: {recommendations['training']}</p>
-        <p>random_access: {recommendations['random_access']}</p>
-        <p>curation: {recommendations['curation']}</p>
+        <table>{recommendation_rows}</table>
+        <h2>Stage Summary</h2>
+        <table>{stage_table}</table>
         <h2>Throughput vs. num_workers</h2>
+        <table>{dataloader_table}</table>
         <h2>Access Pattern Matrix</h2>
+        <table>{sample_rows}</table>
         <h2>Results</h2>
-        <table>{rows}</table>
+        <table>
+          <tr>
+            <th>Stage</th>
+            <th>Backend</th>
+            <th>Pattern</th>
+            <th>Status</th>
+            <th>Metrics</th>
+            <th>Samples</th>
+            <th>Elapsed (s)</th>
+          </tr>
+          {result_rows}
+        </table>
       </body>
     </html>
     """
+
+
+def _best_stage_candidate(
+    report: BenchmarkReport,
+    *,
+    stage: str,
+    preferred_metrics: tuple[str, ...],
+    high_is_better: bool,
+):
+    for metric in preferred_metrics:
+        matches = [
+            result
+            for result in report.results
+            if result.stage == stage and result.status == "ok" and metric in result.metrics
+        ]
+        if matches:
+            chooser = max if high_is_better else min
+            return chooser(matches, key=lambda item: item.metrics[metric])
+    return None
+
+
+def _build_summary_cards(report: BenchmarkReport) -> str:
+    stages = sorted({result.stage for result in report.results})
+    backends = sorted({result.backend for result in report.results})
+    cards = [
+        ("Results", str(len(report.results))),
+        ("Stages", str(len(stages))),
+        ("Backends", str(len(backends))),
+        ("Samples", str(report.dataset.get("samples", "n/a"))),
+    ]
+    return "".join(
+        (
+            "<div class='card'>"
+            f"<div class='muted'>{label}</div>"
+            f"<div><strong>{value}</strong></div>"
+            "</div>"
+        )
+        for label, value in cards
+    )
+
+
+def _build_stage_table(report: BenchmarkReport) -> str:
+    rows = []
+    for stage in sorted({result.stage for result in report.results}):
+        stage_results = [result for result in report.results if result.stage == stage]
+        ok_count = sum(1 for result in stage_results if result.status == "ok")
+        elapsed_values = [result.elapsed_sec for result in stage_results if result.elapsed_sec]
+        avg_elapsed = mean(elapsed_values) if elapsed_values else 0.0
+        rows.append(
+            "<tr>"
+            f"<th>{stage}</th>"
+            f"<td>{len(stage_results)}</td>"
+            f"<td>{ok_count}</td>"
+            f"<td>{avg_elapsed:.4f}</td>"
+            "</tr>"
+        )
+    return (
+        "<tr><th>Stage</th><th>Rows</th><th>OK Rows</th><th>Avg Elapsed (s)</th></tr>"
+        + "".join(rows)
+    )
+
+
+def _build_dataloader_table(report: BenchmarkReport) -> str:
+    rows = []
+    dataloader_results = [result for result in report.results if result.pattern == "dataloader"]
+    if not dataloader_results:
+        return "<tr><td>No DataLoader metrics captured in this report.</td></tr>"
+    for result in dataloader_results:
+        rows.append(
+            "<tr>"
+            f"<td>{result.backend}</td>"
+            f"<td>{result.metadata.get('num_workers', 'n/a')}</td>"
+            f"<td>{result.metadata.get('batch_size', 'n/a')}</td>"
+            f"<td>{result.metrics.get('throughput_samples_per_sec', 0.0):.4f}</td>"
+            "</tr>"
+        )
+    return (
+        "<tr><th>Backend</th><th>num_workers</th><th>batch_size</th><th>Throughput</th></tr>"
+        + "".join(rows)
+    )
+
+
+def _format_metrics(metrics: dict[str, float]) -> str:
+    if not metrics:
+        return "n/a"
+    return ", ".join(f"{key}={float(value):.4f}" for key, value in metrics.items())
+
+
+def _build_result_row(result: BenchmarkResult) -> str:
+    elapsed = result.elapsed_sec if result.elapsed_sec is not None else 0.0
+    return (
+        "<tr>"
+        f"<td>{result.stage}</td>"
+        f"<td>{result.backend}</td>"
+        f"<td>{result.pattern}</td>"
+        f"<td>{result.status}</td>"
+        f"<td>{_format_metrics(result.metrics)}</td>"
+        f"<td>{result.sample_count}</td>"
+        f"<td>{elapsed:.4f}</td>"
+        "</tr>"
+    )
+
+
+def _build_sample_row(result: BenchmarkResult) -> str:
+    return (
+        "<tr>"
+        f"<td>{result.stage}</td>"
+        f"<td>{result.backend}</td>"
+        f"<td>{result.pattern}</td>"
+        f"<td>{_format_metrics(result.metrics)}</td>"
+        "</tr>"
+    )
+
+
+def _report_created_at(report: BenchmarkReport) -> str:
+    return getattr(report, "created_at", getattr(report, "generated_at", "n/a"))
+
+
+def _flatten_result(result: BenchmarkResult) -> dict[str, object]:
+    return {
+        "stage": result.stage,
+        "backend": result.backend,
+        "pattern": result.pattern,
+        "sample_count": result.sample_count,
+        "elapsed_sec": result.elapsed_sec,
+        "status": result.status,
+        "error": result.error or "",
+        **result.metrics,
+        **{f"meta_{key}": value for key, value in result.metadata.items()},
+    }
+
+
+def main(results_path: str | Path) -> int:
+    input_path = Path(results_path)
+    report = load_report(input_path)
+    html = build_dashboard_html(report)
+    output_path = input_path.with_name("benchmark_dashboard.html")
+    output_path.write_text(html, encoding="utf-8")
+    print(output_path)
+    return 0
 
 
 @dataclass(slots=True)

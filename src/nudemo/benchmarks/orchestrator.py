@@ -31,6 +31,7 @@ class BenchmarkOrchestrator:
             sample_count = len(self.dataset)
             results.append(
                 BenchmarkResult(
+                    stage="storage",
                     backend=backend.name,
                     pattern="write_throughput",
                     metrics={
@@ -42,6 +43,7 @@ class BenchmarkOrchestrator:
             )
             results.append(
                 BenchmarkResult(
+                    stage="storage",
                     backend=backend.name,
                     pattern="disk_footprint",
                     metrics={"disk_bytes": float(backend.disk_bytes())},
@@ -51,6 +53,7 @@ class BenchmarkOrchestrator:
             if backend.profile.sequential_samples_per_sec:
                 results.append(
                     BenchmarkResult(
+                        stage="training",
                         backend=backend.name,
                         pattern="sequential_scan",
                         metrics={
@@ -63,6 +66,7 @@ class BenchmarkOrchestrator:
             if backend.supports_random_access:
                 results.append(
                     BenchmarkResult(
+                        stage="evaluation",
                         backend=backend.name,
                         pattern="random_access",
                         metrics={
@@ -77,6 +81,7 @@ class BenchmarkOrchestrator:
                 matches = backend.query_indices(query_predicate)
                 results.append(
                     BenchmarkResult(
+                        stage="curation",
                         backend=backend.name,
                         pattern="curation_query",
                         metrics={"query_time_ms": backend.profile.query_ms},
@@ -87,6 +92,7 @@ class BenchmarkOrchestrator:
                 if backend.supports_payload_fetch:
                     results.append(
                         BenchmarkResult(
+                            stage="curation",
                             backend=backend.name,
                             pattern="e2e_curation",
                             metrics={"per_sample_ms": backend.profile.e2e_ms},
@@ -99,6 +105,7 @@ class BenchmarkOrchestrator:
                 for worker_count in num_workers:
                     results.append(
                         BenchmarkResult(
+                            stage="training",
                             backend=backend.name,
                             pattern="dataloader",
                             metrics={

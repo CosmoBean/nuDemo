@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
+from dataclasses import replace
 from pathlib import Path
+from uuid import uuid4
 
 from nudemo.benchmarks.backends import (
     LanceBackend as SimulatedLanceBackend,
@@ -16,11 +19,17 @@ from nudemo.benchmarks.backends import (
 from nudemo.benchmarks.backends import (
     WebDatasetBackend as SimulatedWebDatasetBackend,
 )
-from nudemo.benchmarks.export import export_report
+from nudemo.benchmarks.export import export_report, export_report_bundle
+from nudemo.benchmarks.models import BenchmarkResult
 from nudemo.benchmarks.orchestrator import BenchmarkOrchestrator
-from nudemo.benchmarks.runner import BenchmarkRunner, build_write_record, export_records
+from nudemo.benchmarks.runner import (
+    BenchmarkRunner,
+    build_live_report,
+    record_to_result,
+)
 from nudemo.benchmarks.synthetic import SyntheticNuScenesDataset
 from nudemo.config import AppConfig
+from nudemo.domain.models import CAMERAS, RADARS
 from nudemo.extraction.providers import resolve_provider
 from nudemo.ingestion.kafka import KafkaBenchmarker, KafkaPayloadEncoder
 from nudemo.reporting.dashboard import build_dashboard_html
@@ -59,6 +68,182 @@ def make_simulated_backends() -> dict[str, object]:
         "lance": SimulatedLanceBackend(),
         "webdataset": SimulatedWebDatasetBackend(),
     }
+
+
+def _benchmark_extraction(
+    config: AppConfig,
+    provider_name: str,
+    limit: int | None,
+) -> tuple[BenchmarkResult, dict[str, int | float | str]]:
+    t0 = time.perf_counter()
+    sample_count = 0
+    scene_names: set[str] = set()
+    total_payload_bytes = 0
+    total_annotations = 0
+    missing_sensor_count = 0
+    for sample in _iter_samples(config, provider_name, limit):
+        sample_count += 1
+        scene_names.add(sample.scene_name)
+        total_annotations += len(sample.annotations)
+        total_payload_bytes += sum(camera.nbytes for camera in sample.cameras.values())
+        total_payload_bytes += int(sample.lidar_top.nbytes)
+        total_payload_bytes += sum(radar.nbytes for radar in sample.radars.values())
+        missing_sensor_count += len(set(CAMERAS) - set(sample.cameras))
+        missing_sensor_count += len(set(RADARS) - set(sample.radars))
+    elapsed = time.perf_counter() - t0
+    metrics = {
+        "throughput_samples_per_sec": sample_count / elapsed if elapsed else 0.0,
+        "avg_payload_mb_per_sample": (
+            (total_payload_bytes / sample_count) / (1024 * 1024) if sample_count else 0.0
+        ),
+        "avg_annotations_per_sample": total_annotations / sample_count if sample_count else 0.0,
+        "missing_sensor_count": float(missing_sensor_count),
+    }
+    summary = {
+        "samples": sample_count,
+        "scenes": len(scene_names),
+        "provider": provider_name,
+    }
+    return (
+        BenchmarkResult(
+            stage="extraction",
+            backend=provider_name,
+            pattern="extract_summary",
+            metrics=metrics,
+            sample_count=sample_count,
+            elapsed_sec=elapsed,
+        ),
+        summary,
+    )
+
+
+def _benchmark_kafka(
+    config: AppConfig,
+    provider_name: str,
+    limit: int | None,
+) -> list[BenchmarkResult]:
+    def avg_message_kb(payload: dict[str, float | int]) -> float:
+        return float(payload["total_mb"]) * 1024 / max(float(payload["messages"]), 1.0)
+
+    suffix = uuid4().hex[:8]
+    kafka_settings = replace(
+        config.services.kafka,
+        raw_topic=f"{config.services.kafka.raw_topic}.{suffix}",
+        refined_topic=f"{config.services.kafka.refined_topic}.{suffix}",
+    )
+    benchmarker = KafkaBenchmarker(
+        settings=kafka_settings,
+        encoder=KafkaPayloadEncoder(config.services.minio),
+    )
+    benchmarker.create_topics()
+    results: list[BenchmarkResult] = []
+    for mode, pattern_base, topic, group_prefix in [
+        ("metadata-only", "kafka_metadata", kafka_settings.refined_topic, "meta"),
+        ("full-payload", "kafka_full_payload", kafka_settings.raw_topic, "full"),
+    ]:
+        produce = benchmarker.produce_samples(
+            _iter_samples(config, provider_name, limit),
+            mode=mode,
+        )
+        results.append(
+            BenchmarkResult(
+                stage="ingestion",
+                backend="Kafka",
+                pattern=f"{pattern_base}_produce",
+                metrics={
+                    "throughput_msg_sec": float(produce["throughput_msg_sec"]),
+                    "throughput_mb_sec": float(produce["throughput_mb_sec"]),
+                    "total_mb": float(produce["total_mb"]),
+                    "avg_message_kb": avg_message_kb(produce),
+                },
+                metadata={"topic": topic, "mode": mode},
+                sample_count=int(produce["messages"]),
+                elapsed_sec=float(produce["elapsed_sec"]),
+            )
+        )
+        consume = benchmarker.benchmark_consumer(topic, f"{group_prefix}-{suffix}")
+        results.append(
+            BenchmarkResult(
+                stage="ingestion",
+                backend="Kafka",
+                pattern=f"{pattern_base}_consume",
+                metrics={
+                    "throughput_msg_sec": float(consume["throughput_msg_sec"]),
+                    "throughput_mb_sec": float(consume["throughput_mb_sec"]),
+                    "total_mb": float(consume["total_mb"]),
+                    "avg_message_kb": avg_message_kb(consume),
+                },
+                metadata={"topic": topic, "mode": mode},
+                sample_count=int(consume["messages"]),
+                elapsed_sec=float(consume["elapsed_sec"]),
+            )
+        )
+    return results
+
+
+def _run_live_benchmark(
+    config: AppConfig,
+    args: argparse.Namespace,
+) -> tuple[dict[str, int | float | str], list[BenchmarkResult]]:
+    selected_names = args.backends or ["minio-postgres", "redis", "lance", "webdataset"]
+    dataset_result, dataset_summary = _benchmark_extraction(config, args.provider, args.limit)
+    results: list[BenchmarkResult] = [dataset_result]
+    try:
+        results.extend(_benchmark_kafka(config, args.provider, args.limit))
+    except Exception as exc:  # pragma: no cover - network/service failures depend on environment
+        results.append(
+            BenchmarkResult(
+                stage="ingestion",
+                backend="Kafka",
+                pattern="kafka_benchmark",
+                metrics={},
+                status="error",
+                error=str(exc),
+            )
+        )
+
+    available_backends = make_backends(config)
+    candidate_backends = {name: available_backends[name] for name in selected_names}
+    successful_backends: dict[str, object] = {}
+    for name, backend in candidate_backends.items():
+        try:
+            write_result = backend.write_samples(_iter_samples(config, args.provider, args.limit))
+        except Exception as exc:  # pragma: no cover - depends on external services
+            results.append(
+                BenchmarkResult(
+                    stage="storage",
+                    backend=backend.name,
+                    pattern="write_throughput",
+                    metrics={},
+                    status="error",
+                    error=str(exc),
+                )
+            )
+            continue
+
+        successful_backends[name] = backend
+        results.append(
+            BenchmarkResult(
+                stage="storage",
+                backend=backend.name,
+                pattern="write_throughput",
+                metrics={
+                    "throughput_samples_per_sec": float(write_result.throughput),
+                    "bytes_written": float(write_result.bytes_written),
+                },
+                sample_count=int(write_result.samples_written),
+                elapsed_sec=float(write_result.elapsed_sec),
+            )
+        )
+
+    runner = BenchmarkRunner(backends=successful_backends)
+    random_indices = list(range(min(dataset_summary["samples"], args.random_sample_count)))
+    if successful_backends:
+        results.extend(
+            record_to_result(record)
+            for record in runner.run_storage_suite(random_indices=random_indices)
+        )
+    return dataset_summary, results
 
 
 def command_doctor(args: argparse.Namespace) -> int:
@@ -163,22 +348,26 @@ def command_benchmark(args: argparse.Namespace) -> int:
         )
         return 0
 
-    selected_backends = {name: make_backends(config)[name] for name in selected_names}
-
-    records = []
-    for backend in selected_backends.values():
-        write_result = backend.write_samples(_iter_samples(config, args.provider, args.limit))
-        records.append(build_write_record(write_result))
-
-    runner = BenchmarkRunner(backends=selected_backends)
-    records.extend(runner.run_storage_suite())
-    json_path, csv_path = export_records(records, config.runtime.reports_root)
+    dataset_summary, results = _run_live_benchmark(config, args)
+    report = build_live_report(
+        suite_name="nuDemo live benchmark suite",
+        dataset=dataset_summary,
+        results=results,
+    )
+    report_path, flat_json_path, csv_path = export_report_bundle(
+        report,
+        config.runtime.reports_root,
+    )
+    dashboard_path = config.runtime.reports_root / "benchmark_dashboard.html"
+    dashboard_path.write_text(build_dashboard_html(report), encoding="utf-8")
     print(
         json.dumps(
             {
-                "json": str(json_path),
+                "report": str(report_path),
+                "json": str(flat_json_path),
                 "csv": str(csv_path),
-                "records": len(records),
+                "dashboard": str(dashboard_path),
+                "records": len(results),
             },
             indent=2,
         )

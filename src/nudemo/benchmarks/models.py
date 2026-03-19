@@ -12,26 +12,35 @@ class BenchmarkResult:
     metadata: dict[str, int | float | str] = field(default_factory=dict)
     sample_count: int = 0
     elapsed_sec: float = 0.0
+    stage: str = ""
+    status: str = "ok"
+    error: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "stage": self.stage,
             "backend": self.backend,
             "pattern": self.pattern,
             "metrics": self.metrics,
             "metadata": self.metadata,
             "sample_count": self.sample_count,
             "elapsed_sec": self.elapsed_sec,
+            "status": self.status,
+            "error": self.error,
         }
 
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> BenchmarkResult:
         return cls(
+            stage=str(payload.get("stage", "")),
             backend=str(payload["backend"]),
             pattern=str(payload["pattern"]),
             metrics=dict(payload.get("metrics", {})),
             metadata=dict(payload.get("metadata", {})),
             sample_count=int(payload.get("sample_count", 0)),
             elapsed_sec=float(payload.get("elapsed_sec", 0.0)),
+            status=str(payload.get("status", "ok")),
+            error=str(payload["error"]) if payload.get("error") is not None else None,
         )
 
 

@@ -1,3 +1,15 @@
-from nudemo.reporting.dashboard import build_app, load_results
+from nudemo.reporting.dashboard import (
+    DashboardApp,
+    build_dashboard_html,
+    build_recommendation_summary,
+    load_results,
+    main,
+)
 
-__all__ = ["build_app", "load_results"]
+__all__ = [
+    "DashboardApp",
+    "build_dashboard_html",
+    "build_recommendation_summary",
+    "load_results",
+    "main",
+]

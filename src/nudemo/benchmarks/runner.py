@@ -7,7 +7,9 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
+from nudemo.benchmarks.models import BenchmarkReport, BenchmarkResult
 from nudemo.storage.base import StorageBackend, StorageWriteResult
 
 
@@ -151,7 +153,11 @@ def export_records(records: list[BenchmarkRecord], output_root: Path) -> tuple[P
     rows = [record.as_row() for record in records]
     with json_path.open("w", encoding="utf-8") as handle:
         json.dump(rows, handle, indent=2)
-    fieldnames = sorted({key for row in rows for key in row})
+    fieldnames = (
+        sorted({key for row in rows for key in row})
+        if rows
+        else ["backend", "pattern"]
+    )
     with csv_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
@@ -159,12 +165,68 @@ def export_records(records: list[BenchmarkRecord], output_root: Path) -> tuple[P
     return json_path, csv_path
 
 
+def stage_for_pattern(pattern: str) -> str:
+    if pattern in {"extract_summary"}:
+        return "extraction"
+    if pattern.startswith("kafka_"):
+        return "ingestion"
+    if pattern in {"write_throughput", "disk_footprint"}:
+        return "storage"
+    if pattern in {"sequential_scan", "dataloader"}:
+        return "training"
+    if pattern in {"random_access"}:
+        return "evaluation"
+    if pattern in {"curation_query", "e2e_curation"}:
+        return "curation"
+    return "misc"
+
+
+def record_to_result(record: BenchmarkRecord) -> BenchmarkResult:
+    sample_count = 0
+    elapsed_sec = 0.0
+    metadata: dict[str, int | float | str] = {}
+    if "total_samples" in record.metrics:
+        sample_count = int(record.metrics["total_samples"])
+    if "num_fetches" in record.metrics:
+        sample_count = int(record.metrics["num_fetches"])
+    if "num_results" in record.metrics:
+        sample_count = int(record.metrics["num_results"])
+    if "num_fetched" in record.metrics:
+        sample_count = int(record.metrics["num_fetched"])
+    if "elapsed_sec" in record.metrics:
+        elapsed_sec = float(record.metrics["elapsed_sec"])
+    return BenchmarkResult(
+        stage=stage_for_pattern(record.pattern),
+        backend=record.backend,
+        pattern=record.pattern,
+        metrics={
+            key: float(value)
+            for key, value in record.metrics.items()
+            if isinstance(value, int | float)
+        },
+        metadata=metadata,
+        sample_count=sample_count,
+        elapsed_sec=elapsed_sec,
+    )
+
+
+def build_live_report(
+    *,
+    suite_name: str,
+    dataset: dict[str, int | float | str],
+    results: list[BenchmarkResult],
+) -> BenchmarkReport:
+    report = BenchmarkReport(suite_name=suite_name, dataset=dataset, results=results)
+    report.dataset.setdefault("run_id", uuid4().hex[:12])
+    return report
+
+
 @dataclass(slots=True)
 class BenchmarkRunner:
     backends: dict[str, StorageBackend]
 
     def run_storage_suite(self, random_indices: list[int] | None = None) -> list[BenchmarkRecord]:
-        indices = random_indices or [0, 1, 2, 3, 4]
+        indices = [0, 1, 2, 3, 4] if random_indices is None else random_indices
         records: list[BenchmarkRecord] = []
         for backend in self.backends.values():
             records.append(benchmark_sequential(backend.name, backend.sequential_iter, num_runs=1))
