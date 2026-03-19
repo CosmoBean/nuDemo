@@ -9,6 +9,7 @@ BACKEND ?= lance
 MODE ?= metadata-only
 BACKENDS ?=
 RESULTS ?= artifacts/reports/benchmark_report.json
+RUN_ID ?=
 NUM_RUNS ?= 1
 RANDOM_SAMPLE_COUNT ?= 10
 BATCH_SIZE ?= 4
@@ -36,8 +37,8 @@ endif
 
 .PHONY: help bootstrap bootstrap-legacy check-env deps doctor cli extract extract-synthetic \
 	kafka kafka-topics kafka-metadata kafka-full storage storage-minio-postgres storage-redis \
-	storage-lance storage-webdataset benchmark-sim benchmark-real dashboard lint test \
-	clean infra-up infra-down infra-ps infra-logs
+	storage-lance storage-webdataset benchmark-sim benchmark-real dashboard telemetry-runs \
+	telemetry-dashboard lint test clean infra-up infra-down infra-ps infra-logs
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
@@ -100,6 +101,12 @@ benchmark-real: ## Run live backend benchmarks against the configured provider
 
 dashboard: ## Render the benchmark dashboard from RESULTS=...
 	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark dashboard --results-path $(RESULTS)
+
+telemetry-runs: ## Show recent telemetry runs stored in PostgreSQL
+	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) telemetry runs --limit $(or $(LIMIT),10)
+
+telemetry-dashboard: ## Render telemetry dashboard from PostgreSQL; optional RUN_ID=<id>
+	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) telemetry dashboard $(if $(RUN_ID),--run-id $(RUN_ID),--latest)
 
 lint: ## Run Ruff over src/ and tests/
 	@$(UV) run --python $(PYTHON) ruff check src tests

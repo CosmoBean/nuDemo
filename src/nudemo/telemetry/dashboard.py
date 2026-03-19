@@ -1,0 +1,247 @@
+from __future__ import annotations
+
+from html import escape
+
+
+def build_telemetry_dashboard_html(
+    run: dict[str, object],
+    spans: list[dict[str, object]],
+    snapshots: list[dict[str, object]],
+) -> str:
+    summary = dict(run.get("summary") or {})
+    dataset = dict(run.get("dataset") or {})
+    summary_cards = _build_summary_cards(run, summary, dataset)
+    bottleneck_rows = _build_bottleneck_rows(spans)
+    span_rows = _build_span_rows(spans)
+    peak_rows = _build_service_peaks(snapshots)
+    snapshot_rows = _build_snapshot_rows(snapshots)
+    artifact_rows = _build_artifact_rows(run)
+    return f"""
+    <html>
+      <head>
+        <style>
+          body {{ font-family: sans-serif; margin: 32px; color: #1f2937; }}
+          h1, h2 {{ margin-bottom: 12px; }}
+          .cards {{
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 12px;
+            margin: 16px 0 24px;
+          }}
+          .card {{
+            border: 1px solid #d1d5db;
+            border-radius: 12px;
+            padding: 16px;
+            background: #f9fafb;
+          }}
+          table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin: 12px 0 24px;
+          }}
+          th, td {{
+            border: 1px solid #e5e7eb;
+            padding: 8px 10px;
+            text-align: left;
+            vertical-align: top;
+          }}
+          th {{ background: #f3f4f6; }}
+          .muted {{ color: #6b7280; }}
+          code {{ font-family: monospace; }}
+        </style>
+      </head>
+      <body>
+        <h1>Telemetry Dashboard</h1>
+        <p class="muted">
+          Run <code>{escape(str(run.get("run_id", "n/a")))}</code> for
+          <strong>{escape(str(run.get("suite_name", "n/a")))}</strong>.
+          Status: <strong>{escape(str(run.get("status", "n/a")))}</strong>.
+        </p>
+        <div class="cards">{summary_cards}</div>
+        <h2>Artifacts</h2>
+        <table>{artifact_rows}</table>
+        <h2>Top Bottlenecks</h2>
+        <table>{bottleneck_rows}</table>
+        <h2>Service Peaks</h2>
+        <table>{peak_rows}</table>
+        <h2>Span Timeline</h2>
+        <table>{span_rows}</table>
+        <h2>Service Snapshots</h2>
+        <table>{snapshot_rows}</table>
+      </body>
+    </html>
+    """
+
+
+def _build_summary_cards(
+    run: dict[str, object],
+    summary: dict[str, object],
+    dataset: dict[str, object],
+) -> str:
+    cards = [
+        ("Provider", str(run.get("provider", "n/a"))),
+        ("Samples", str(dataset.get("samples", "n/a"))),
+        ("Elapsed (s)", _format_float(run.get("elapsed_sec"))),
+        ("Results", str(summary.get("result_count", "n/a"))),
+        ("Errors", str(summary.get("error_count", "n/a"))),
+    ]
+    return "".join(
+        (
+            "<div class='card'>"
+            f"<div class='muted'>{escape(label)}</div>"
+            f"<div><strong>{escape(value)}</strong></div>"
+            "</div>"
+        )
+        for label, value in cards
+    )
+
+
+def _build_artifact_rows(run: dict[str, object]) -> str:
+    rows = [
+        ("Benchmark Report", run.get("report_path")),
+        ("Flat JSON", run.get("json_path")),
+        ("CSV", run.get("csv_path")),
+        ("Benchmark Dashboard", run.get("dashboard_path")),
+        ("Telemetry Dashboard", run.get("telemetry_dashboard_path")),
+    ]
+    rendered = [
+        f"<tr><th>{escape(label)}</th><td>{escape(str(value or 'n/a'))}</td></tr>"
+        for label, value in rows
+    ]
+    return "".join(rendered)
+
+
+def _build_bottleneck_rows(spans: list[dict[str, object]]) -> str:
+    top_spans = sorted(
+        spans,
+        key=lambda span: float(span.get("elapsed_sec") or 0.0),
+        reverse=True,
+    )[:10]
+    rows = [
+        (
+            "<tr>"
+            "<th>Stage</th><th>Backend</th><th>Pattern</th><th>Status</th>"
+            "<th>Elapsed (s)</th><th>Samples</th><th>Error</th>"
+            "</tr>"
+        )
+    ]
+    for span in top_spans:
+        rows.append(
+            "<tr>"
+            f"<td>{escape(str(span.get('stage', '')))}</td>"
+            f"<td>{escape(str(span.get('backend', '')))}</td>"
+            f"<td>{escape(str(span.get('pattern', '')))}</td>"
+            f"<td>{escape(str(span.get('status', '')))}</td>"
+            f"<td>{_format_float(span.get('elapsed_sec'))}</td>"
+            f"<td>{escape(str(span.get('sample_count', 0)))}</td>"
+            f"<td>{escape(str(span.get('error') or ''))}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
+def _build_service_peaks(snapshots: list[dict[str, object]]) -> str:
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for snapshot in snapshots:
+        grouped.setdefault(str(snapshot.get("service", "unknown")), []).append(snapshot)
+
+    rows = [
+        (
+            "<tr><th>Service</th><th>Peak CPU %</th><th>Peak Memory</th>"
+            "<th>Peak Net In</th><th>Peak Net Out</th><th>Snapshots</th></tr>"
+        )
+    ]
+    for service in sorted(grouped):
+        service_rows = grouped[service]
+        peak_cpu = max(float(row.get("cpu_percent") or 0.0) for row in service_rows)
+        peak_mem = max(int(row.get("mem_usage_bytes") or 0) for row in service_rows)
+        peak_net_in = max(int(row.get("net_input_bytes") or 0) for row in service_rows)
+        peak_net_out = max(int(row.get("net_output_bytes") or 0) for row in service_rows)
+        rows.append(
+            "<tr>"
+            f"<td>{escape(service)}</td>"
+            f"<td>{peak_cpu:.2f}</td>"
+            f"<td>{_format_bytes(peak_mem)}</td>"
+            f"<td>{_format_bytes(peak_net_in)}</td>"
+            f"<td>{_format_bytes(peak_net_out)}</td>"
+            f"<td>{len(service_rows)}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
+def _build_span_rows(spans: list[dict[str, object]]) -> str:
+    rows = [
+        (
+            "<tr><th>Started</th><th>Stage</th><th>Backend</th><th>Pattern</th>"
+            "<th>Status</th><th>Elapsed (s)</th><th>Sample Count</th><th>Key Metrics</th></tr>"
+        )
+    ]
+    for span in spans:
+        metrics = dict(span.get("metrics") or {})
+        rows.append(
+            "<tr>"
+            f"<td>{escape(str(span.get('started_at', '')))}</td>"
+            f"<td>{escape(str(span.get('stage', '')))}</td>"
+            f"<td>{escape(str(span.get('backend', '')))}</td>"
+            f"<td>{escape(str(span.get('pattern', '')))}</td>"
+            f"<td>{escape(str(span.get('status', '')))}</td>"
+            f"<td>{_format_float(span.get('elapsed_sec'))}</td>"
+            f"<td>{escape(str(span.get('sample_count', 0)))}</td>"
+            f"<td>{escape(_format_metrics(metrics))}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
+def _build_snapshot_rows(snapshots: list[dict[str, object]]) -> str:
+    rows = [
+        (
+            "<tr><th>Observed</th><th>Label</th><th>Service</th><th>CPU %</th>"
+            "<th>Memory</th><th>Mem %</th><th>Net In</th><th>Net Out</th><th>PIDs</th></tr>"
+        )
+    ]
+    for snapshot in snapshots:
+        rows.append(
+            "<tr>"
+            f"<td>{escape(str(snapshot.get('observed_at', '')))}</td>"
+            f"<td>{escape(str(snapshot.get('snapshot_label', '')))}</td>"
+            f"<td>{escape(str(snapshot.get('service', '')))}</td>"
+            f"<td>{_format_float(snapshot.get('cpu_percent'))}</td>"
+            f"<td>{_format_bytes(int(snapshot.get('mem_usage_bytes') or 0))}</td>"
+            f"<td>{_format_float(snapshot.get('mem_percent'))}</td>"
+            f"<td>{_format_bytes(int(snapshot.get('net_input_bytes') or 0))}</td>"
+            f"<td>{_format_bytes(int(snapshot.get('net_output_bytes') or 0))}</td>"
+            f"<td>{escape(str(snapshot.get('pids') or ''))}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
+
+
+def _format_metrics(metrics: dict[str, object]) -> str:
+    if not metrics:
+        return "n/a"
+    preview = []
+    for key, value in metrics.items():
+        if isinstance(value, int | float):
+            preview.append(f"{key}={value:.4f}")
+        else:
+            preview.append(f"{key}={value}")
+    return ", ".join(preview[:4])
+
+
+def _format_bytes(value: int) -> str:
+    if value <= 0:
+        return "0B"
+    size = float(value)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f}{unit}" if unit != "B" else f"{int(size)}B"
+        size /= 1024
+    return f"{value}B"
+
+
+def _format_float(value: object) -> str:
+    if value is None:
+        return "n/a"
+    return f"{float(value):.4f}"

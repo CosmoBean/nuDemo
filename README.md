@@ -5,6 +5,7 @@
 - Real-path code for nuScenes extraction, Kafka ingestion, and MinIO/PostgreSQL, Redis, Lance, and WebDataset storage backends.
 - A synthetic benchmark suite that runs without Docker or the real dataset and produces report artifacts immediately.
 - Reporting hooks that export JSON/CSV-style benchmark data and render a lightweight dashboard HTML summary.
+- Persisted telemetry for live benchmark runs, including stage spans and Docker service snapshots stored in PostgreSQL.
 
 ## Quickstart
 
@@ -31,6 +32,28 @@ This writes:
 - `artifacts/reports/benchmark_report.json`
 - `artifacts/reports/benchmark_dashboard.html`
 
+Run the live benchmark suite against the Docker-backed services:
+
+```bash
+make deps
+make benchmark-real PROVIDER=real LIMIT=16 BACKENDS="minio-postgres redis lance webdataset"
+```
+
+This writes:
+
+- `artifacts/reports/benchmark_report.json`
+- `artifacts/reports/benchmark_results.json`
+- `artifacts/reports/benchmark_results.csv`
+- `artifacts/reports/benchmark_dashboard.html`
+- `artifacts/reports/telemetry_dashboard.html`
+
+Inspect persisted telemetry history:
+
+```bash
+make telemetry-runs
+make telemetry-dashboard
+```
+
 ## Real Pipeline Paths
 
 The real integration points are implemented under `src/nudemo/`:
@@ -39,6 +62,7 @@ The real integration points are implemented under `src/nudemo/`:
 - `ingestion/` encodes metadata-only and full-payload Kafka messages and exposes topic/bootstrap helpers.
 - `storage/` contains live backends for MinIO+PostgreSQL, Redis, Lance, and WebDataset.
 - `benchmarks/` contains an in-memory orchestration layer for fast local validation and CI.
+- `telemetry/` persists run history, stage spans, and service snapshots into PostgreSQL and renders a bottleneck dashboard.
 
 Local infrastructure definitions live in `config/docker-compose.yml` and `config/init.sql`.
 
@@ -55,6 +79,6 @@ The scaffold follows the architecture in the spec:
 
 ## Current Status
 
-- Verified locally: synthetic benchmark generation, JSON export, dashboard HTML generation, typed data models, and CLI flows.
-- Implemented but not exercised on this machine: Docker-backed services and live nuScenes ingestion, because `docker` is not installed here and the real dataset is not present.
+- Verified locally: real nuScenes-mini extraction, Kafka ingestion, MinIO/PostgreSQL, Redis, Lance, and WebDataset benchmark runs, JSON/CSV export, benchmark dashboard HTML generation, telemetry ingestion into PostgreSQL, and telemetry dashboard HTML generation.
+- Recent live benchmark runs can be queried with `nudemo telemetry runs` and re-rendered with `nudemo telemetry dashboard`.
 - Target runtime: Python `3.12`; the repo bootstraps that version explicitly because the external stack is not yet a clean Python 3.13 target.

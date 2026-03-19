@@ -38,12 +38,18 @@ from nudemo.storage.lance_store import LanceBackend
 from nudemo.storage.minio_postgres import MinioPostgresBackend
 from nudemo.storage.redis_store import RedisBackend
 from nudemo.storage.webdataset_store import WebDatasetBackend
+from nudemo.telemetry.dashboard import build_telemetry_dashboard_html
+from nudemo.telemetry.store import TelemetryRecorder, fetch_recent_runs, fetch_run_bundle
 
 
 def _iter_samples(config: AppConfig, provider_name: str, limit: int | None):
     provider = resolve_provider(config, provider_name)
     effective_limit = limit or config.pipeline.sample_limit
     return provider.iter_samples(limit=effective_limit)
+
+
+def _compose_file() -> Path:
+    return Path(__file__).resolve().parents[2] / "config/docker-compose.yml"
 
 
 def make_backends(config: AppConfig) -> dict[str, object]:
@@ -184,23 +190,34 @@ def _benchmark_kafka(
 def _run_live_benchmark(
     config: AppConfig,
     args: argparse.Namespace,
+    recorder: TelemetryRecorder | None = None,
 ) -> tuple[dict[str, int | float | str], list[BenchmarkResult]]:
     selected_names = args.backends or ["minio-postgres", "redis", "lance", "webdataset"]
     dataset_result, dataset_summary = _benchmark_extraction(config, args.provider, args.limit)
     results: list[BenchmarkResult] = [dataset_result]
+    if recorder is not None:
+        recorder.record_result(dataset_result)
+        recorder.snapshot_services("post_extraction")
     try:
-        results.extend(_benchmark_kafka(config, args.provider, args.limit))
+        kafka_results = _benchmark_kafka(config, args.provider, args.limit)
+        results.extend(kafka_results)
+        if recorder is not None:
+            for result in kafka_results:
+                recorder.record_result(result)
+            recorder.snapshot_services("post_kafka")
     except Exception as exc:  # pragma: no cover - network/service failures depend on environment
-        results.append(
-            BenchmarkResult(
-                stage="ingestion",
-                backend="Kafka",
-                pattern="kafka_benchmark",
-                metrics={},
-                status="error",
-                error=str(exc),
-            )
+        error_result = BenchmarkResult(
+            stage="ingestion",
+            backend="Kafka",
+            pattern="kafka_benchmark",
+            metrics={},
+            status="error",
+            error=str(exc),
         )
+        results.append(error_result)
+        if recorder is not None:
+            recorder.record_result(error_result)
+            recorder.snapshot_services("post_kafka")
 
     available_backends = make_backends(config)
     candidate_backends = {name: available_backends[name] for name in selected_names}
@@ -209,41 +226,111 @@ def _run_live_benchmark(
         try:
             write_result = backend.write_samples(_iter_samples(config, args.provider, args.limit))
         except Exception as exc:  # pragma: no cover - depends on external services
-            results.append(
-                BenchmarkResult(
-                    stage="storage",
-                    backend=backend.name,
-                    pattern="write_throughput",
-                    metrics={},
-                    status="error",
-                    error=str(exc),
-                )
-            )
-            continue
-
-        successful_backends[name] = backend
-        results.append(
-            BenchmarkResult(
+            error_result = BenchmarkResult(
                 stage="storage",
                 backend=backend.name,
                 pattern="write_throughput",
-                metrics={
-                    "throughput_samples_per_sec": float(write_result.throughput),
-                    "bytes_written": float(write_result.bytes_written),
-                },
-                sample_count=int(write_result.samples_written),
-                elapsed_sec=float(write_result.elapsed_sec),
+                metrics={},
+                status="error",
+                error=str(exc),
             )
+            results.append(error_result)
+            if recorder is not None:
+                recorder.record_result(error_result)
+                recorder.snapshot_services(f"post_storage_{name.replace('-', '_')}")
+            continue
+
+        successful_backends[name] = backend
+        storage_result = BenchmarkResult(
+            stage="storage",
+            backend=backend.name,
+            pattern="write_throughput",
+            metrics={
+                "throughput_samples_per_sec": float(write_result.throughput),
+                "bytes_written": float(write_result.bytes_written),
+            },
+            sample_count=int(write_result.samples_written),
+            elapsed_sec=float(write_result.elapsed_sec),
         )
+        results.append(storage_result)
+        if recorder is not None:
+            recorder.record_result(storage_result)
+            recorder.snapshot_services(f"post_storage_{name.replace('-', '_')}")
 
     runner = BenchmarkRunner(backends=successful_backends)
     random_indices = list(range(min(dataset_summary["samples"], args.random_sample_count)))
     if successful_backends:
-        results.extend(
+        suite_results = [
             record_to_result(record)
             for record in runner.run_storage_suite(random_indices=random_indices)
-        )
+        ]
+        results.extend(suite_results)
+        if recorder is not None:
+            for result in suite_results:
+                recorder.record_result(result)
     return dataset_summary, results
+
+
+def _result_summary(results: list[BenchmarkResult]) -> dict[str, int]:
+    error_count = sum(1 for result in results if result.status != "ok")
+    return {
+        "result_count": len(results),
+        "ok_count": len(results) - error_count,
+        "error_count": error_count,
+    }
+
+
+def _write_telemetry_dashboard(
+    config: AppConfig,
+    *,
+    run_id: str,
+) -> Path:
+    run, spans, snapshots = fetch_run_bundle(config.services.postgres, run_id=run_id)
+    output_path = config.runtime.reports_root / "telemetry_dashboard.html"
+    output_path.write_text(
+        build_telemetry_dashboard_html(run, spans, snapshots),
+        encoding="utf-8",
+    )
+    return output_path
+
+
+def command_telemetry_runs(args: argparse.Namespace) -> int:
+    config = AppConfig.load(args.config)
+    try:
+        runs = fetch_recent_runs(config.services.postgres, limit=args.limit)
+    except Exception as exc:  # pragma: no cover - depends on external services
+        print(json.dumps({"error": str(exc)}, indent=2))
+        return 1
+    print(json.dumps(runs, indent=2, default=str))
+    return 0
+
+
+def command_telemetry_dashboard(args: argparse.Namespace) -> int:
+    config = AppConfig.load(args.config)
+    run_id = None if args.latest else args.run_id
+    try:
+        run, spans, snapshots = fetch_run_bundle(config.services.postgres, run_id=run_id)
+    except Exception as exc:  # pragma: no cover - depends on external services
+        print(json.dumps({"error": str(exc)}, indent=2))
+        return 1
+    output_path = config.runtime.reports_root / f"telemetry_dashboard_{run['run_id']}.html"
+    output_path.write_text(
+        build_telemetry_dashboard_html(run, spans, snapshots),
+        encoding="utf-8",
+    )
+    print(
+        json.dumps(
+            {
+                "run_id": run["run_id"],
+                "dashboard": str(output_path),
+                "span_count": len(spans),
+                "snapshot_count": len(snapshots),
+            },
+            indent=2,
+            default=str,
+        )
+    )
+    return 0
 
 
 def command_doctor(args: argparse.Namespace) -> int:
@@ -316,6 +403,17 @@ def command_storage(args: argparse.Namespace) -> int:
 def command_benchmark(args: argparse.Namespace) -> int:
     config = AppConfig.load(args.config)
     selected_names = args.backends or ["minio-postgres", "redis", "lance", "webdataset"]
+    run_id = uuid4().hex[:12]
+    recorder = TelemetryRecorder.start(
+        settings=config.services.postgres,
+        compose_file=_compose_file(),
+        run_id=run_id,
+        suite_name="nuDemo benchmark suite" if args.simulate else "nuDemo live benchmark suite",
+        provider="synthetic" if args.simulate else args.provider,
+        simulate=args.simulate,
+        sample_limit=args.limit,
+    )
+    recorder.snapshot_services("run_start")
 
     if args.simulate:
         dataset = SyntheticNuScenesDataset(
@@ -333,14 +431,35 @@ def command_benchmark(args: argparse.Namespace) -> int:
             batch_size=args.batch_size,
             num_workers=tuple(args.num_workers),
         )
+        report.dataset["run_id"] = run_id
         report_path = export_report(report, config.runtime.reports_root / "benchmark_report.json")
         dashboard_path = config.runtime.reports_root / "benchmark_dashboard.html"
         dashboard_path.write_text(build_dashboard_html(report), encoding="utf-8")
+        for result in report.results:
+            recorder.record_result(result)
+        telemetry_dashboard_path = None
+        telemetry_summary = _result_summary(report.results)
+        if recorder.enabled:
+            recorder.complete(
+                status="partial" if telemetry_summary["error_count"] else "ok",
+                dataset=report.dataset,
+                summary=telemetry_summary,
+                report_path=report_path,
+                dashboard_path=dashboard_path,
+            )
+            try:
+                telemetry_dashboard_path = _write_telemetry_dashboard(config, run_id=run_id)
+            except Exception as exc:  # pragma: no cover - depends on external services
+                recorder.errors.append(str(exc))
         print(
             json.dumps(
                 {
                     "report": str(report_path),
                     "dashboard": str(dashboard_path),
+                    "telemetry_dashboard": (
+                        str(telemetry_dashboard_path) if telemetry_dashboard_path else None
+                    ),
+                    "telemetry_run_id": run_id,
                     "results": len(report.results),
                 },
                 indent=2,
@@ -348,7 +467,8 @@ def command_benchmark(args: argparse.Namespace) -> int:
         )
         return 0
 
-    dataset_summary, results = _run_live_benchmark(config, args)
+    dataset_summary, results = _run_live_benchmark(config, args, recorder=recorder)
+    dataset_summary["run_id"] = run_id
     report = build_live_report(
         suite_name="nuDemo live benchmark suite",
         dataset=dataset_summary,
@@ -360,6 +480,26 @@ def command_benchmark(args: argparse.Namespace) -> int:
     )
     dashboard_path = config.runtime.reports_root / "benchmark_dashboard.html"
     dashboard_path.write_text(build_dashboard_html(report), encoding="utf-8")
+    telemetry_dashboard_path = None
+    telemetry_summary = _result_summary(results)
+    if recorder.enabled:
+        recorder.snapshot_services("run_end")
+        telemetry_dashboard_path = config.runtime.reports_root / "telemetry_dashboard.html"
+        recorder.complete(
+            status="partial" if telemetry_summary["error_count"] else "ok",
+            dataset=dataset_summary,
+            summary=telemetry_summary,
+            report_path=report_path,
+            json_path=flat_json_path,
+            csv_path=csv_path,
+            dashboard_path=dashboard_path,
+            telemetry_dashboard_path=telemetry_dashboard_path,
+        )
+        try:
+            telemetry_dashboard_path = _write_telemetry_dashboard(config, run_id=run_id)
+        except Exception as exc:  # pragma: no cover - depends on external services
+            recorder.errors.append(str(exc))
+            telemetry_dashboard_path = None
     print(
         json.dumps(
             {
@@ -367,6 +507,10 @@ def command_benchmark(args: argparse.Namespace) -> int:
                 "json": str(flat_json_path),
                 "csv": str(csv_path),
                 "dashboard": str(dashboard_path),
+                "telemetry_dashboard": (
+                    str(telemetry_dashboard_path) if telemetry_dashboard_path else None
+                ),
+                "telemetry_run_id": run_id,
                 "records": len(results),
             },
             indent=2,
@@ -432,6 +576,18 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard = benchmark_sub.add_parser("dashboard")
     dashboard.add_argument("--results-path", required=True)
     dashboard.set_defaults(func=command_dashboard)
+
+    telemetry = subparsers.add_parser("telemetry")
+    telemetry_sub = telemetry.add_subparsers(dest="telemetry_command", required=True)
+
+    telemetry_runs = telemetry_sub.add_parser("runs")
+    telemetry_runs.add_argument("--limit", type=int, default=10)
+    telemetry_runs.set_defaults(func=command_telemetry_runs)
+
+    telemetry_dashboard = telemetry_sub.add_parser("dashboard")
+    telemetry_dashboard.add_argument("--run-id", default=None)
+    telemetry_dashboard.add_argument("--latest", action="store_true")
+    telemetry_dashboard.set_defaults(func=command_telemetry_dashboard)
     return parser
 
 
