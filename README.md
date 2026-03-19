@@ -5,7 +5,7 @@
 - Real-path code for nuScenes extraction, Kafka ingestion, and MinIO/PostgreSQL, Redis, Lance, and WebDataset storage backends.
 - A synthetic benchmark suite that runs without Docker or the real dataset and produces report artifacts immediately.
 - Reporting hooks that export JSON/CSV-style benchmark data and render a lightweight dashboard HTML summary.
-- Persisted telemetry for live benchmark runs, including stage spans and Docker service snapshots stored in PostgreSQL.
+- Persisted telemetry for benchmark runs, including stage spans and Docker service snapshots stored in PostgreSQL when the Docker-backed stack is available.
 
 ## Quickstart
 
@@ -21,6 +21,9 @@ Check the runtime and dataset visibility:
 .venv/bin/nudemo doctor
 ```
 
+For real-data runs, place the official `nuScenes v1.0-mini` dataset under `data/nuscenes` so that
+`data/nuscenes/v1.0-mini` exists, or set `NUDEMO_DATASET_ROOT` to a different extracted dataset root.
+
 Run the service-free synthetic benchmark suite:
 
 ```bash
@@ -32,12 +35,19 @@ This writes:
 - `artifacts/reports/benchmark_report.json`
 - `artifacts/reports/benchmark_dashboard.html`
 
+If PostgreSQL is available, synthetic runs also persist telemetry history and can emit
+`artifacts/reports/telemetry_dashboard.html`.
+
 Run the live benchmark suite against the Docker-backed services:
 
 ```bash
 make deps
 make benchmark-real PROVIDER=real LIMIT=16 BACKENDS="minio-postgres redis lance webdataset"
 ```
+
+`benchmark-real` reloads the selected backends with exactly the requested `LIMIT`, then benchmarks
+extraction, Kafka ingest/consume, storage writes, sequential scans, random access, curation queries,
+and disk footprint.
 
 This writes:
 
@@ -52,6 +62,13 @@ Inspect persisted telemetry history:
 ```bash
 make telemetry-runs
 make telemetry-dashboard
+```
+
+`make telemetry-dashboard` renders the latest run. To render a specific run, pass its
+`telemetry_run_id` back to the CLI or Make:
+
+```bash
+make telemetry-dashboard RUN_ID=<run_id>
 ```
 
 ## Real Pipeline Paths
@@ -80,5 +97,6 @@ The scaffold follows the architecture in the spec:
 ## Current Status
 
 - Verified locally: real nuScenes-mini extraction, Kafka ingestion, MinIO/PostgreSQL, Redis, Lance, and WebDataset benchmark runs, JSON/CSV export, benchmark dashboard HTML generation, telemetry ingestion into PostgreSQL, and telemetry dashboard HTML generation.
-- Recent live benchmark runs can be queried with `nudemo telemetry runs` and re-rendered with `nudemo telemetry dashboard`.
+- Recent benchmark runs can be queried with `nudemo telemetry runs` and re-rendered with `nudemo telemetry dashboard`.
+- Telemetry is additive. If PostgreSQL or Docker snapshots are unavailable, the benchmark still writes the benchmark report and dashboard artifacts.
 - Target runtime: Python `3.12`; the repo bootstraps that version explicitly because the external stack is not yet a clean Python 3.13 target.
