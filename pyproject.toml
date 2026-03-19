@@ -23,9 +23,9 @@ pipeline = [
   "minio>=7.2,<8",
   "redis>=5.2,<6",
   "pyarrow>=19.0,<20",
-  "lance>=1.2.1,<2",
   "webdataset>=1.0.2,<2",
   "confluent-kafka>=2.13,<3",
+  "pylance>=3.0.1,<4",
 ]
 training = [
   "torch>=2.6,<3",

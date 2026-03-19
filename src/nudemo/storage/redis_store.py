@@ -23,6 +23,14 @@ class RedisBackend:
 
     def write_samples(self, samples):
         client = self._client()
+        pipeline = client.pipeline()
+        for pattern in ("sample:*", "embedding:*", "location:*", "category:*"):
+            keys = list(client.scan_iter(pattern))
+            if keys:
+                pipeline.delete(*keys)
+        pipeline.delete("samples_by_timestamp")
+        pipeline.execute()
+
         t0 = time.perf_counter()
         bytes_written = 0
         pipeline = client.pipeline()
@@ -50,7 +58,7 @@ class RedisBackend:
             pipeline.sadd(f"location:{sample.location}", sample_key)
             for annotation in sample.annotations:
                 pipeline.sadd(f"category:{annotation.category}", sample_key)
-            if sample_idx and sample_idx % 100 == 0:
+            if samples_written and samples_written % 100 == 0:
                 pipeline.execute()
             samples_written += 1
         pipeline.execute()

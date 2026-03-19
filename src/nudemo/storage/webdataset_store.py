@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,8 @@ class WebDatasetBackend:
         import webdataset as wds
 
         root = self._root_dir()
+        if root.exists():
+            shutil.rmtree(root)
         root.mkdir(parents=True, exist_ok=True)
         t0 = time.perf_counter()
         bytes_written = 0
@@ -59,11 +62,16 @@ class WebDatasetBackend:
     def sequential_iter(self):
         import webdataset as wds
 
-        for sample in wds.WebDataset(self.shard_pattern):
+        shard_paths = [str(path) for path in sorted(self._root_dir().glob("*.tar"))]
+        if not shard_paths:
+            return
+        for sample in wds.WebDataset(shard_paths, shardshuffle=False):
+            cam = sample.get("cam_front.jpg", sample.get("CAM_FRONT.jpg"))
+            lidar = sample.get("lidar_top.npy", sample.get("LIDAR_TOP.npy"))
             yield {
                 "key": sample["__key__"],
-                "cam": sample["CAM_FRONT.jpg"],
-                "lidar": sample["LIDAR_TOP.npy"],
+                "cam": cam,
+                "lidar": lidar,
             }
 
     def fetch(self, sample_idx: int):
@@ -74,4 +82,3 @@ class WebDatasetBackend:
 
     def disk_footprint(self) -> int:
         return directory_size(self._root_dir())
-

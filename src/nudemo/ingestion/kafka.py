@@ -80,7 +80,13 @@ class KafkaBenchmarker:
                 config={"max.message.bytes": "1048576"},
             ),
         ]
-        admin.create_topics(topics)
+        futures = admin.create_topics(topics)
+        for future in futures.values():
+            try:
+                future.result()
+            except Exception as exc:  # pragma: no cover - depends on broker state
+                if "TOPIC_ALREADY_EXISTS" not in str(exc):
+                    raise
 
     def produce_samples(
         self,

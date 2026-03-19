@@ -30,10 +30,12 @@ class MinioPostgresBackend:
 
     def write_samples(self, samples):
         minio_client, connection = self._clients()
-        t0 = time.perf_counter()
-        bytes_written = 0
         if not minio_client.bucket_exists(self.minio.bucket):
             minio_client.make_bucket(self.minio.bucket)
+        self._clear_sample_objects(minio_client)
+
+        t0 = time.perf_counter()
+        bytes_written = 0
 
         with connection, closing(connection.cursor()) as cursor:
             cursor.execute("TRUNCATE annotations, samples, scenes RESTART IDENTITY CASCADE")
@@ -147,6 +149,14 @@ class MinioPostgresBackend:
             bytes_written=bytes_written,
         )
 
+    def _clear_sample_objects(self, minio_client) -> None:
+        for object_info in minio_client.list_objects(
+            self.minio.bucket,
+            prefix="samples/",
+            recursive=True,
+        ):
+            minio_client.remove_object(self.minio.bucket, object_info.object_name)
+
     def sequential_iter(self):
         import psycopg
         from minio import Minio
@@ -213,4 +223,34 @@ class MinioPostgresBackend:
             return [row[0] for row in cursor.fetchall()]
 
     def disk_footprint(self) -> int:
-        return 0
+        import psycopg
+        from minio import Minio
+
+        minio_client = Minio(
+            self.minio.endpoint,
+            access_key=self.minio.access_key,
+            secret_key=self.minio.secret_key,
+            secure=self.minio.secure,
+        )
+        object_bytes = 0
+        if minio_client.bucket_exists(self.minio.bucket):
+            object_bytes = sum(
+                object_info.size
+                for object_info in minio_client.list_objects(
+                    self.minio.bucket,
+                    prefix="samples/",
+                    recursive=True,
+                )
+            )
+
+        with psycopg.connect(self.postgres.dsn) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COALESCE(SUM(pg_total_relation_size(oid)), 0)
+                FROM pg_class
+                WHERE relname = ANY(%s)
+                """,
+                (["annotations", "samples", "scenes"],),
+            )
+            table_bytes = int(cursor.fetchone()[0] or 0)
+        return object_bytes + table_bytes
