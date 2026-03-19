@@ -30,6 +30,7 @@ from nudemo.benchmarks.runner import (
 from nudemo.benchmarks.synthetic import SyntheticNuScenesDataset
 from nudemo.config import AppConfig
 from nudemo.domain.models import CAMERAS, RADARS
+from nudemo.explorer import create_explorer_app
 from nudemo.extraction.providers import resolve_provider
 from nudemo.ingestion.kafka import KafkaBenchmarker, KafkaPayloadEncoder
 from nudemo.reporting.dashboard import build_dashboard_html
@@ -524,6 +525,13 @@ def command_dashboard(args: argparse.Namespace) -> int:
     return dashboard_main(results_path)
 
 
+def command_explore(args: argparse.Namespace) -> int:
+    config = AppConfig.load(args.config)
+    app = create_explorer_app(config, result_limit=args.limit)
+    app.run(host=args.host, port=args.port, debug=args.debug)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="nudemo")
     parser.add_argument("--config", default=None)
@@ -576,6 +584,13 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard = benchmark_sub.add_parser("dashboard")
     dashboard.add_argument("--results-path", required=True)
     dashboard.set_defaults(func=command_dashboard)
+
+    explore = subparsers.add_parser("explore")
+    explore.add_argument("--host", default="127.0.0.1")
+    explore.add_argument("--port", type=int, default=8788)
+    explore.add_argument("--limit", type=int, default=200)
+    explore.add_argument("--debug", action="store_true")
+    explore.set_defaults(func=command_explore)
 
     telemetry = subparsers.add_parser("telemetry")
     telemetry_sub = telemetry.add_subparsers(dest="telemetry_command", required=True)

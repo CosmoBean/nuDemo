@@ -17,6 +17,9 @@ NUM_WORKERS ?= 0 2 4
 REPORTS_HOST ?= 127.0.0.1
 REPORTS_PORT ?= 8787
 REPORTS_ROOT ?= $(CURDIR)/artifacts/reports
+EXPLORER_HOST ?= 127.0.0.1
+EXPLORER_PORT ?= 8788
+EXPLORER_LIMIT ?= 200
 EXTRA_ARGS ?=
 DOCKER_COMPOSE ?= docker compose -f config/docker-compose.yml
 
@@ -41,8 +44,8 @@ endif
 .PHONY: help bootstrap bootstrap-legacy check-env deps doctor cli extract extract-synthetic \
 	kafka kafka-topics kafka-metadata kafka-full storage storage-minio-postgres storage-redis \
 	storage-lance storage-webdataset benchmark-sim benchmark-real dashboard telemetry-runs \
-	telemetry-dashboard reports-index serve-reports lint test clean infra-up infra-down \
-	infra-ps infra-logs
+	telemetry-dashboard reports-index serve-reports data-explorer lint test clean infra-up \
+	infra-down infra-ps infra-logs
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
@@ -119,6 +122,10 @@ serve-reports: ## Serve artifacts/reports over localhost for browser or tunnel a
 	@python3 ./scripts/render_reports_index.py "$(REPORTS_ROOT)" >/dev/null
 	@NUDEMO_REPORTS_ROOT="$(REPORTS_ROOT)" NUDEMO_REPORTS_HOST="$(REPORTS_HOST)" NUDEMO_REPORTS_PORT="$(REPORTS_PORT)" \
 		bash ./scripts/serve_reports.sh
+
+data-explorer: ## Serve the searchable ingested-data explorer
+	@NUDEMO_EXPLORER_HOST="$(EXPLORER_HOST)" NUDEMO_EXPLORER_PORT="$(EXPLORER_PORT)" NUDEMO_EXPLORER_LIMIT="$(EXPLORER_LIMIT)" \
+		bash ./scripts/serve_explorer.sh
 
 lint: ## Run Ruff over src/ and tests/
 	@$(UV) run --python $(PYTHON) ruff check src tests

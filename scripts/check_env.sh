@@ -28,8 +28,9 @@ import tomllib
 
 data = tomllib.loads(Path("pyproject.toml").read_text())
 assert data["project"]["requires-python"] == ">=3.12,<3.13"
-for group in ("pipeline", "training", "dashboard", "dev"):
-    assert group in data["dependency-groups"]
+optional = data["project"]["optional-dependencies"]
+for group in ("dataset", "pipeline", "reporting", "dev"):
+    assert group in optional
 print("pyproject: ok")
 PY
 
@@ -37,4 +38,3 @@ if command -v docker >/dev/null 2>&1; then
   docker compose -f config/docker-compose.yml config >/dev/null
   echo "compose: ok"
 fi
-

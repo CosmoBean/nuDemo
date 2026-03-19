@@ -14,7 +14,7 @@ if ! command -v python3.12 >/dev/null 2>&1; then
   uv python install 3.12
 fi
 
-uv sync --group pipeline --group training --group dashboard --group dev
+uv sync --extra dataset --extra pipeline --extra reporting --extra dev
 
 if [[ "${START_INFRA:-0}" == "1" ]]; then
   if ! command -v docker >/dev/null 2>&1; then
@@ -23,4 +23,3 @@ if [[ "${START_INFRA:-0}" == "1" ]]; then
   fi
   docker compose -f config/docker-compose.yml up -d
 fi
-

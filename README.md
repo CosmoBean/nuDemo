@@ -64,6 +64,7 @@ make telemetry-runs
 make telemetry-dashboard
 make reports-index
 make serve-reports
+make data-explorer
 ```
 
 `make telemetry-dashboard` renders the latest run. To render a specific run, pass its
@@ -76,6 +77,27 @@ make telemetry-dashboard RUN_ID=<run_id>
 `make reports-index` renders `artifacts/reports/index.html`, and `make serve-reports` serves
 `artifacts/reports/` over `http://127.0.0.1:8787/` by default so the generated HTML, JSON, and CSV
 artifacts can be viewed from a browser or fronted by a reverse proxy or tunnel.
+
+The same browser entry point now also serves a searchable ingested-data explorer at `/explorer`.
+It reads sample metadata from PostgreSQL and proxies camera images from MinIO, so it requires the
+`minio-postgres` backend to be loaded with real or synthetic samples first:
+
+```bash
+make storage-minio-postgres PROVIDER=real LIMIT=64
+make data-explorer
+```
+
+From the running browser host you can then use:
+
+- `/`
+- `/explorer`
+- `/benchmark_dashboard.html`
+- `/telemetry_dashboard.html`
+
+`make data-explorer` starts a live browser app on `http://127.0.0.1:8788/` for the ingested
+records. It supports text search over token, scene, location, and annotation category;
+location/category filters; minimum-annotation filtering; summary cards; and `CAM_*` previews
+sourced from MinIO when the camera blobs are available.
 
 ## Real Pipeline Paths
 

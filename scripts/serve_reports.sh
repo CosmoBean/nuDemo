@@ -6,9 +6,28 @@ cd "$(dirname "$0")/.."
 REPORTS_ROOT="${NUDEMO_REPORTS_ROOT:-$PWD/artifacts/reports}"
 REPORTS_HOST="${NUDEMO_REPORTS_HOST:-127.0.0.1}"
 REPORTS_PORT="${NUDEMO_REPORTS_PORT:-8787}"
+PYTHON_BIN="${NUDEMO_BROWSER_PYTHON:-$PWD/.venv/bin/python}"
 
 mkdir -p "$REPORTS_ROOT"
 python3 ./scripts/render_reports_index.py "$REPORTS_ROOT" >/dev/null
 
-echo "Serving reports from $REPORTS_ROOT at http://$REPORTS_HOST:$REPORTS_PORT/"
-exec python3 -m http.server "$REPORTS_PORT" --bind "$REPORTS_HOST" --directory "$REPORTS_ROOT"
+echo "Serving nuDemo browser from $REPORTS_ROOT at http://$REPORTS_HOST:$REPORTS_PORT/"
+if [[ -x "$PYTHON_BIN" ]]; then
+  exec "$PYTHON_BIN" -m uvicorn nudemo.explorer.app:create_app --factory \
+    --app-dir "$PWD/src" \
+    --host "$REPORTS_HOST" \
+    --port "$REPORTS_PORT"
+fi
+
+if command -v uv >/dev/null 2>&1; then
+  exec uv run --python 3.12 uvicorn nudemo.explorer.app:create_app --factory \
+    --app-dir "$PWD/src" \
+    --host "$REPORTS_HOST" \
+    --port "$REPORTS_PORT"
+fi
+
+PYTHON_BIN="$(command -v python3)"
+exec "$PYTHON_BIN" -m uvicorn nudemo.explorer.app:create_app --factory \
+  --app-dir "$PWD/src" \
+  --host "$REPORTS_HOST" \
+  --port "$REPORTS_PORT"
