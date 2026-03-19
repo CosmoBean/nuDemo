@@ -8,6 +8,7 @@ REPORTS_HOST="${NUDEMO_REPORTS_HOST:-127.0.0.1}"
 REPORTS_PORT="${NUDEMO_REPORTS_PORT:-8787}"
 
 mkdir -p "$REPORTS_ROOT"
+python3 ./scripts/render_reports_index.py "$REPORTS_ROOT" >/dev/null
 
 echo "Serving reports from $REPORTS_ROOT at http://$REPORTS_HOST:$REPORTS_PORT/"
 exec python3 -m http.server "$REPORTS_PORT" --bind "$REPORTS_HOST" --directory "$REPORTS_ROOT"

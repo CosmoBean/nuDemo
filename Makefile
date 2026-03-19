@@ -41,7 +41,8 @@ endif
 .PHONY: help bootstrap bootstrap-legacy check-env deps doctor cli extract extract-synthetic \
 	kafka kafka-topics kafka-metadata kafka-full storage storage-minio-postgres storage-redis \
 	storage-lance storage-webdataset benchmark-sim benchmark-real dashboard telemetry-runs \
-	telemetry-dashboard serve-reports lint test clean infra-up infra-down infra-ps infra-logs
+	telemetry-dashboard reports-index serve-reports lint test clean infra-up infra-down \
+	infra-ps infra-logs
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
@@ -111,7 +112,11 @@ telemetry-runs: ## Show recent telemetry runs stored in PostgreSQL
 telemetry-dashboard: ## Render telemetry dashboard from PostgreSQL; optional RUN_ID=<id>
 	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) telemetry dashboard $(if $(RUN_ID),--run-id $(RUN_ID),--latest)
 
+reports-index: ## Render artifacts/reports/index.html for browser-friendly navigation
+	@python3 ./scripts/render_reports_index.py "$(REPORTS_ROOT)"
+
 serve-reports: ## Serve artifacts/reports over localhost for browser or tunnel access
+	@python3 ./scripts/render_reports_index.py "$(REPORTS_ROOT)" >/dev/null
 	@NUDEMO_REPORTS_ROOT="$(REPORTS_ROOT)" NUDEMO_REPORTS_HOST="$(REPORTS_HOST)" NUDEMO_REPORTS_PORT="$(REPORTS_PORT)" \
 		bash ./scripts/serve_reports.sh
 
