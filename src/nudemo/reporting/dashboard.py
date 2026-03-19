@@ -74,14 +74,27 @@ def build_dashboard_html(report: BenchmarkReport) -> str:
     <html>
       <head>
         <style>
+          :root {{
+            --bg: #f6f2e8;
+            --panel: #fffdf8;
+            --line: #131313;
+            --ink: #131313;
+            --muted: #474747;
+            --accent-alt: #ffd84d;
+            --accent-soft: #d7ecff;
+            --shadow: 8px 8px 0 #131313;
+          }}
           body {{
-            font-family: sans-serif;
+            font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
             margin: 32px;
-            color: #1f2937;
-            background: #f8fafc;
+            color: var(--ink);
+            background:
+              radial-gradient(circle at top right, rgba(255, 216, 77, 0.36), transparent 22%),
+              linear-gradient(180deg, #fff8ef 0%, var(--bg) 100%);
           }}
           main {{ max-width: 1440px; margin: 0 auto; }}
           h1, h2 {{ margin-bottom: 12px; }}
+          h1 {{ letter-spacing: -0.04em; line-height: 1; }}
           .cards {{
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -89,17 +102,19 @@ def build_dashboard_html(report: BenchmarkReport) -> str:
             margin: 16px 0 24px;
           }}
           .card {{
-            border: 1px solid #d1d5db;
-            border-radius: 12px;
+            border: 3px solid var(--line);
+            border-radius: 20px;
             padding: 16px;
-            background: #f9fafb;
+            background: var(--panel);
+            box-shadow: 6px 6px 0 var(--line);
           }}
           .table-wrap {{
             overflow-x: auto;
             margin: 12px 0 24px;
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            background: white;
+            border: 3px solid var(--line);
+            border-radius: 20px;
+            background: var(--panel);
+            box-shadow: var(--shadow);
           }}
           table {{
             width: 100%;
@@ -108,16 +123,25 @@ def build_dashboard_html(report: BenchmarkReport) -> str:
             margin: 0;
           }}
           th, td {{
-            border: 1px solid #e5e7eb;
+            border: 2px solid var(--line);
             padding: 8px 10px;
             text-align: left;
             vertical-align: top;
             overflow-wrap: anywhere;
             word-break: break-word;
           }}
-          th {{ background: #f3f4f6; }}
-          .muted {{ color: #6b7280; }}
-          code {{ overflow-wrap: anywhere; word-break: break-word; }}
+          th {{
+            background: var(--accent-alt);
+            color: var(--ink);
+          }}
+          .muted {{ color: var(--muted); }}
+          code {{
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            background: var(--accent-soft);
+            padding: 2px 6px;
+            border-radius: 8px;
+          }}
           .compact {{ font-size: 0.92rem; line-height: 1.45; }}
         </style>
       </head>

@@ -313,22 +313,24 @@ def build_browser_home_html() -> str:
     <title>nuDemo Browser</title>
     <style>
       :root {
-        --bg: #f4f7fb;
-        --panel: #ffffff;
-        --line: #d7dfeb;
-        --ink: #132238;
-        --muted: #586779;
-        --accent: #0f62fe;
-        --accent-soft: rgba(15, 98, 254, 0.1);
+        --bg: #f6f2e8;
+        --panel: #fffdf8;
+        --line: #131313;
+        --ink: #131313;
+        --muted: #404040;
+        --accent: #ff5d73;
+        --accent-alt: #ffd84d;
+        --accent-soft: #d7ecff;
+        --shadow: 8px 8px 0 #131313;
       }
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
         color: var(--ink);
         background:
-          radial-gradient(circle at top right, rgba(15, 98, 254, 0.16), transparent 28%),
-          linear-gradient(180deg, #f8fbff 0%, var(--bg) 100%);
+          radial-gradient(circle at top right, rgba(255, 216, 77, 0.5), transparent 24%),
+          linear-gradient(180deg, #fff9ef 0%, var(--bg) 100%);
       }
       main {
         max-width: 1120px;
@@ -337,9 +339,9 @@ def build_browser_home_html() -> str:
       }
       .hero {
         background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 24px;
-        box-shadow: 0 24px 56px rgba(19, 34, 56, 0.08);
+        border: 3px solid var(--line);
+        border-radius: 28px;
+        box-shadow: var(--shadow);
         overflow: hidden;
       }
       .hero-inner {
@@ -352,6 +354,7 @@ def build_browser_home_html() -> str:
         margin: 0 0 12px;
         font-size: clamp(2rem, 4vw, 3.4rem);
         line-height: 1.05;
+        letter-spacing: -0.04em;
       }
       p {
         margin: 0;
@@ -364,10 +367,14 @@ def build_browser_home_html() -> str:
         gap: 8px;
         padding: 7px 12px;
         border-radius: 999px;
-        background: var(--accent-soft);
-        color: var(--accent);
+        background: var(--accent-alt);
+        color: var(--ink);
+        border: 2px solid var(--line);
+        box-shadow: 4px 4px 0 var(--line);
         font-size: 0.9rem;
         margin-bottom: 16px;
+        font-weight: 700;
+        text-transform: uppercase;
       }
       .card-grid {
         display: grid;
@@ -375,10 +382,11 @@ def build_browser_home_html() -> str:
         gap: 16px;
       }
       .card {
-        background: #fbfdff;
-        border: 1px solid var(--line);
-        border-radius: 18px;
+        background: var(--panel);
+        border: 3px solid var(--line);
+        border-radius: 22px;
         padding: 18px;
+        box-shadow: 8px 8px 0 var(--line);
       }
       .card strong {
         display: block;
@@ -388,9 +396,10 @@ def build_browser_home_html() -> str:
       .card a {
         display: inline-block;
         margin-top: 14px;
-        color: var(--accent);
+        color: var(--ink);
         font-weight: 600;
         text-decoration: none;
+        border-bottom: 2px solid var(--line);
       }
       .card a:hover { text-decoration: underline; }
       .links {
@@ -400,26 +409,31 @@ def build_browser_home_html() -> str:
       .link-row {
         display: flex;
         justify-content: space-between;
+        align-items: center;
         gap: 16px;
         padding: 14px 16px;
-        border-radius: 16px;
-        background: #eef4ff;
-        border: 1px solid rgba(15, 98, 254, 0.12);
+        border-radius: 18px;
+        background: var(--accent-soft);
+        border: 3px solid var(--line);
+        box-shadow: 6px 6px 0 var(--line);
       }
       .link-row a {
-        color: var(--accent);
+        color: var(--ink);
         font-weight: 600;
         text-decoration: none;
+        white-space: nowrap;
       }
       .section-title {
         margin: 28px 0 12px;
         font-size: 1rem;
         letter-spacing: 0.04em;
         text-transform: uppercase;
-        color: var(--muted);
+        color: var(--ink);
+        font-weight: 800;
       }
       @media (max-width: 860px) {
         .hero-inner { grid-template-columns: 1fr; }
+        .link-row { align-items: flex-start; flex-direction: column; }
       }
     </style>
   </head>
@@ -492,23 +506,25 @@ def build_explorer_html() -> str:
     <title>nuDemo Explorer</title>
     <style>
       :root {
-        --bg: #f3f6fb;
-        --panel: #ffffff;
-        --line: #d7dfeb;
-        --ink: #122033;
-        --muted: #5c6b80;
-        --accent: #0f62fe;
-        --accent-soft: rgba(15, 98, 254, 0.12);
-        --shadow: 0 20px 48px rgba(18, 32, 51, 0.08);
+        --bg: #f6f2e8;
+        --panel: #fffdf8;
+        --line: #131313;
+        --ink: #131313;
+        --muted: #444444;
+        --accent: #ff5d73;
+        --accent-alt: #ffd84d;
+        --accent-soft: #d7ecff;
+        --success-soft: #dcffd8;
+        --shadow: 8px 8px 0 #131313;
       }
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
         color: var(--ink);
         background:
-          radial-gradient(circle at top right, rgba(15, 98, 254, 0.12), transparent 24%),
-          linear-gradient(180deg, #f9fbfe 0%, var(--bg) 100%);
+          radial-gradient(circle at top right, rgba(255, 216, 77, 0.42), transparent 20%),
+          linear-gradient(180deg, #fff8ef 0%, var(--bg) 100%);
       }
       main {
         max-width: 1440px;
@@ -522,8 +538,8 @@ def build_explorer_html() -> str:
       }
       .panel {
         background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 20px;
+        border: 3px solid var(--line);
+        border-radius: 24px;
         box-shadow: var(--shadow);
       }
       .sidebar, .detail {
@@ -538,6 +554,8 @@ def build_explorer_html() -> str:
       h1 {
         margin: 0 0 8px;
         font-size: 2rem;
+        line-height: 1;
+        letter-spacing: -0.04em;
       }
       h2, h3 {
         margin: 0 0 10px;
@@ -552,9 +570,14 @@ def build_explorer_html() -> str:
         margin-bottom: 18px;
       }
       .subnav a {
-        color: var(--accent);
+        color: var(--ink);
         font-weight: 600;
         text-decoration: none;
+        padding: 10px 12px;
+        border: 3px solid var(--line);
+        border-radius: 999px;
+        background: var(--accent-alt);
+        box-shadow: 4px 4px 0 var(--line);
       }
       .summary-grid {
         display: grid;
@@ -565,14 +588,26 @@ def build_explorer_html() -> str:
       .summary-card {
         padding: 16px;
         border-radius: 18px;
-        background: #fbfdff;
-        border: 1px solid var(--line);
+        background: var(--panel);
+        border: 3px solid var(--line);
+        box-shadow: 6px 6px 0 var(--line);
+        min-width: 0;
       }
       .summary-card strong {
         display: block;
         margin-top: 6px;
         color: var(--ink);
         font-size: 1.2rem;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        line-height: 1.1;
+      }
+      .summary-card span {
+        display: block;
+        font-size: 0.84rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
       }
       .field {
         display: grid;
@@ -581,24 +616,23 @@ def build_explorer_html() -> str:
       }
       input, select, button {
         width: 100%;
-        border: 1px solid var(--line);
-        border-radius: 12px;
+        border: 3px solid var(--line);
+        border-radius: 14px;
         padding: 11px 12px;
         font: inherit;
-        background: #fff;
+        background: #fffdf8;
         color: var(--ink);
+        box-shadow: 4px 4px 0 var(--line);
       }
       button {
         cursor: pointer;
         background: var(--accent);
-        color: #fff;
-        border-color: transparent;
+        color: var(--ink);
         font-weight: 600;
       }
       button.secondary {
-        background: #edf4ff;
-        color: var(--accent);
-        border-color: rgba(15, 98, 254, 0.12);
+        background: var(--accent-soft);
+        color: var(--ink);
       }
       .button-row {
         display: flex;
@@ -635,6 +669,8 @@ def build_explorer_html() -> str:
         margin: 0 0 8px;
         font-size: 1rem;
         color: var(--ink);
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
       .meta-list {
         display: grid;
@@ -652,9 +688,12 @@ def build_explorer_html() -> str:
         align-items: center;
         padding: 5px 10px;
         border-radius: 999px;
-        background: var(--accent-soft);
-        color: var(--accent);
+        background: var(--success-soft);
+        color: var(--ink);
+        border: 2px solid var(--line);
         font-size: 0.8rem;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
       .list {
         list-style: none;
@@ -664,11 +703,27 @@ def build_explorer_html() -> str:
         gap: 10px;
       }
       .list li {
-        display: flex;
-        justify-content: space-between;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
         gap: 12px;
-        padding-bottom: 10px;
-        border-bottom: 1px solid var(--line);
+        align-items: start;
+        padding: 12px 0;
+        border-bottom: 2px dashed var(--line);
+      }
+      .list li span {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .list li strong {
+        white-space: nowrap;
+        align-self: start;
+        padding: 3px 8px;
+        border: 2px solid var(--line);
+        border-radius: 999px;
+        background: var(--accent-alt);
+        color: var(--ink);
+        box-shadow: 3px 3px 0 var(--line);
       }
       .detail-placeholder {
         display: grid;
@@ -683,10 +738,11 @@ def build_explorer_html() -> str:
         margin-top: 14px;
       }
       .camera-frame {
-        border: 1px solid var(--line);
+        border: 3px solid var(--line);
         border-radius: 14px;
         overflow: hidden;
-        background: #fbfdff;
+        background: var(--panel);
+        box-shadow: 5px 5px 0 var(--line);
       }
       .camera-frame img {
         width: 100%;
@@ -703,18 +759,23 @@ def build_explorer_html() -> str:
         display: block;
         padding: 4px 12px 12px;
         font-size: 0.84rem;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
       .annotation-table {
         width: 100%;
         border-collapse: collapse;
         margin-top: 14px;
         font-size: 0.88rem;
+        table-layout: fixed;
       }
       .annotation-table th, .annotation-table td {
-        padding: 8px 0;
-        border-bottom: 1px solid var(--line);
+        padding: 8px 10px;
+        border-bottom: 2px dashed var(--line);
         text-align: left;
         vertical-align: top;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
       .pagination {
         display: flex;
@@ -725,18 +786,28 @@ def build_explorer_html() -> str:
       }
       .notice {
         padding: 12px 14px;
-        border-radius: 14px;
+        border-radius: 16px;
         background: #fff4e8;
         color: #8a4b08;
-        border: 1px solid #ffd7a8;
+        border: 3px solid var(--line);
+        box-shadow: 5px 5px 0 var(--line);
         margin-bottom: 12px;
       }
       code {
         font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
-        background: #edf4ff;
+        background: var(--accent-soft);
         color: var(--ink);
         padding: 2px 6px;
         border-radius: 8px;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .results-head span,
+      .meta-list span,
+      #page_meta,
+      #result_meta {
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
       @media (max-width: 1260px) {
         .shell { grid-template-columns: 300px 1fr; }
@@ -892,15 +963,15 @@ def build_explorer_html() -> str:
         el.summary.innerHTML = cards.map(([label, value]) => `
           <section class="panel summary-card">
             <span>${label}</span>
-            <strong>${Number(value).toLocaleString()}</strong>
+            <strong class="metric-value">${Number(value).toLocaleString()}</strong>
           </section>
         `).join("");
 
         el.topLocations.innerHTML = (summary.top_locations || []).map((row) => `
-          <li><span>${row.location}</span><strong>${row.count}</strong></li>
+          <li><span>${row.location}</span><strong>${Number(row.count).toLocaleString()}</strong></li>
         `).join("");
         el.topCategories.innerHTML = (summary.top_categories || []).map((row) => `
-          <li><span>${row.category}</span><strong>${row.count}</strong></li>
+          <li><span>${row.category}</span><strong>${Number(row.count).toLocaleString()}</strong></li>
         `).join("");
       }
 
