@@ -20,11 +20,17 @@ def build_telemetry_dashboard_html(
     <html>
       <head>
         <style>
-          body {{ font-family: sans-serif; margin: 32px; color: #1f2937; }}
+          body {{
+            font-family: sans-serif;
+            margin: 32px;
+            color: #1f2937;
+            background: #f8fafc;
+          }}
+          main {{ max-width: 1440px; margin: 0 auto; }}
           h1, h2 {{ margin-bottom: 12px; }}
           .cards {{
             display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
             gap: 12px;
             margin: 16px 0 24px;
           }}
@@ -34,40 +40,57 @@ def build_telemetry_dashboard_html(
             padding: 16px;
             background: #f9fafb;
           }}
+          .table-wrap {{
+            overflow-x: auto;
+            margin: 12px 0 24px;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            background: white;
+          }}
           table {{
             width: 100%;
             border-collapse: collapse;
-            margin: 12px 0 24px;
+            table-layout: fixed;
+            margin: 0;
           }}
           th, td {{
             border: 1px solid #e5e7eb;
             padding: 8px 10px;
             text-align: left;
             vertical-align: top;
+            overflow-wrap: anywhere;
+            word-break: break-word;
           }}
           th {{ background: #f3f4f6; }}
           .muted {{ color: #6b7280; }}
-          code {{ font-family: monospace; }}
+          code {{
+            font-family: monospace;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+          }}
+          .compact {{ font-size: 0.92rem; line-height: 1.45; }}
         </style>
       </head>
       <body>
-        <h1>Telemetry Dashboard</h1>
-        <p class="muted">
-          Run <code>{escape(str(run.get("run_id", "n/a")))}</code> for
-          <strong>{escape(str(run.get("suite_name", "n/a")))}</strong>.
-          Status: <strong>{escape(str(run.get("status", "n/a")))}</strong>.
-        </p>
-        <div class="cards">{summary_cards}</div>
-        <h2>Artifacts</h2>
-        <table>{artifact_rows}</table>
-        <h2>Top Bottlenecks</h2>
-        <table>{bottleneck_rows}</table>
-        <h2>Service Peaks</h2>
-        <table>{peak_rows}</table>
-        <h2>Span Timeline</h2>
-        <table>{span_rows}</table>
-        <h2>Service Snapshots</h2>
-        <table>{snapshot_rows}</table>
+        <main>
+          <h1>Telemetry Dashboard</h1>
+          <p class="muted compact">
+            Run <code>{escape(str(run.get("run_id", "n/a")))}</code> for
+            <strong>{escape(str(run.get("suite_name", "n/a")))}</strong>.
+            Status: <strong>{escape(str(run.get("status", "n/a")))}</strong>.
+          </p>
+          <div class="cards">{summary_cards}</div>
+          <h2>Artifacts</h2>
+          <div class="table-wrap"><table>{artifact_rows}</table></div>
+          <h2>Top Bottlenecks</h2>
+          <div class="table-wrap"><table>{bottleneck_rows}</table></div>
+          <h2>Service Peaks</h2>
+          <div class="table-wrap"><table>{peak_rows}</table></div>
+          <h2>Span Timeline</h2>
+          <div class="table-wrap"><table>{span_rows}</table></div>
+          <h2>Service Snapshots</h2>
+          <div class="table-wrap"><table>{snapshot_rows}</table></div>
+        </main>
       </body>
     </html>
     """
@@ -188,7 +211,7 @@ def _build_span_rows(spans: list[dict[str, object]]) -> str:
             f"<td>{escape(str(span.get('status', '')))}</td>"
             f"<td>{_format_float(span.get('elapsed_sec'))}</td>"
             f"<td>{escape(str(span.get('sample_count', 0)))}</td>"
-            f"<td>{escape(_format_metrics(metrics))}</td>"
+            f"<td class='compact'>{escape(_format_metrics(metrics))}</td>"
             "</tr>"
         )
     return "".join(rows)

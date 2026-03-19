@@ -74,11 +74,17 @@ def build_dashboard_html(report: BenchmarkReport) -> str:
     <html>
       <head>
         <style>
-          body {{ font-family: sans-serif; margin: 32px; color: #1f2937; }}
+          body {{
+            font-family: sans-serif;
+            margin: 32px;
+            color: #1f2937;
+            background: #f8fafc;
+          }}
+          main {{ max-width: 1440px; margin: 0 auto; }}
           h1, h2 {{ margin-bottom: 12px; }}
           .cards {{
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 12px;
             margin: 16px 0 24px;
           }}
@@ -88,48 +94,65 @@ def build_dashboard_html(report: BenchmarkReport) -> str:
             padding: 16px;
             background: #f9fafb;
           }}
+          .table-wrap {{
+            overflow-x: auto;
+            margin: 12px 0 24px;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            background: white;
+          }}
           table {{
             width: 100%;
             border-collapse: collapse;
-            margin: 12px 0 24px;
+            table-layout: fixed;
+            margin: 0;
           }}
           th, td {{
             border: 1px solid #e5e7eb;
             padding: 8px 10px;
             text-align: left;
             vertical-align: top;
+            overflow-wrap: anywhere;
+            word-break: break-word;
           }}
           th {{ background: #f3f4f6; }}
           .muted {{ color: #6b7280; }}
+          code {{ overflow-wrap: anywhere; word-break: break-word; }}
+          .compact {{ font-size: 0.92rem; line-height: 1.45; }}
         </style>
       </head>
       <body>
-        <h1>{report.suite_name}</h1>
-        <p class="muted">
-          Created at {_report_created_at(report)}. Dataset summary: {report.dataset}.
-        </p>
-        <div class="cards">{summary_cards}</div>
-        <h2>Recommendation Summary</h2>
-        <table>{recommendation_rows}</table>
-        <h2>Stage Summary</h2>
-        <table>{stage_table}</table>
-        <h2>Throughput vs. num_workers</h2>
-        <table>{dataloader_table}</table>
-        <h2>Access Pattern Matrix</h2>
-        <table>{sample_rows}</table>
-        <h2>Results</h2>
-        <table>
-          <tr>
-            <th>Stage</th>
-            <th>Backend</th>
-            <th>Pattern</th>
-            <th>Status</th>
-            <th>Metrics</th>
-            <th>Samples</th>
-            <th>Elapsed (s)</th>
-          </tr>
-          {result_rows}
-        </table>
+        <main>
+          <h1>{report.suite_name}</h1>
+          <p class="muted compact">
+            Created at {_report_created_at(report)}.
+            Dataset summary: {_format_dataset_summary(report.dataset)}.
+          </p>
+          <div class="cards">{summary_cards}</div>
+          <h2>Recommendation Summary</h2>
+          <div class="table-wrap"><table>{recommendation_rows}</table></div>
+          <h2>Stage Summary</h2>
+          <div class="table-wrap"><table>{stage_table}</table></div>
+          <h2>Throughput vs. num_workers</h2>
+          <div class="table-wrap"><table>{dataloader_table}</table></div>
+          <h2>Access Pattern Matrix</h2>
+          <div class="table-wrap"><table>{sample_rows}</table></div>
+          <h2>Results</h2>
+          <div class="table-wrap">
+            <table>
+              <tr>
+                <th>Stage</th>
+                <th>Backend</th>
+                <th>Pattern</th>
+                <th>Status</th>
+                <th>Metrics</th>
+                <th>Samples</th>
+                <th>Elapsed (s)</th>
+              </tr>
+              {result_rows}
+            </table>
+          </div>
+        </main>
       </body>
     </html>
     """
@@ -229,7 +252,7 @@ def _build_result_row(result: BenchmarkResult) -> str:
         f"<td>{result.backend}</td>"
         f"<td>{result.pattern}</td>"
         f"<td>{result.status}</td>"
-        f"<td>{_format_metrics(result.metrics)}</td>"
+        f"<td class='compact'>{_format_metrics(result.metrics)}</td>"
         f"<td>{result.sample_count}</td>"
         f"<td>{elapsed:.4f}</td>"
         "</tr>"
@@ -242,13 +265,20 @@ def _build_sample_row(result: BenchmarkResult) -> str:
         f"<td>{result.stage}</td>"
         f"<td>{result.backend}</td>"
         f"<td>{result.pattern}</td>"
-        f"<td>{_format_metrics(result.metrics)}</td>"
+        f"<td class='compact'>{_format_metrics(result.metrics)}</td>"
         "</tr>"
     )
 
 
 def _report_created_at(report: BenchmarkReport) -> str:
     return getattr(report, "created_at", getattr(report, "generated_at", "n/a"))
+
+
+def _format_dataset_summary(dataset: dict[str, object]) -> str:
+    if not dataset:
+        return "n/a"
+    parts = [f"{key}={value}" for key, value in dataset.items()]
+    return ", ".join(parts)
 
 
 def _flatten_result(result: BenchmarkResult) -> dict[str, object]:
