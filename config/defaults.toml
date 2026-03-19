@@ -1,0 +1,48 @@
+[runtime]
+dataset_root = "data/nuscenes"
+artifacts_root = "artifacts"
+formats_root = "artifacts/formats"
+reports_root = "artifacts/reports"
+
+[pipeline]
+dataset_version = "v1.0-mini"
+sample_limit = 404
+synthetic_enabled = false
+synthetic_scene_count = 10
+synthetic_samples_per_scene = 41
+synthetic_seed = 7
+camera_height = 120
+camera_width = 224
+lidar_points = 2048
+radar_points = 128
+
+[services.kafka]
+bootstrap_servers = "localhost:9092"
+raw_topic = "drivelogs.raw"
+refined_topic = "drivelogs.refined"
+
+[services.minio]
+endpoint = "localhost:9000"
+access_key = "minioadmin"
+secret_key = "minioadmin"
+bucket = "nuscenes"
+secure = false
+
+[services.postgres]
+host = "localhost"
+port = 5432
+database = "nuscenes"
+user = "nuscenes"
+password = "nuscenes"
+
+[services.redis]
+host = "localhost"
+port = 6379
+db = 0
+
+[storage.lance]
+dataset_path = "artifacts/formats/lance/dataset.lance"
+
+[storage.webdataset]
+shard_pattern = "artifacts/formats/webdataset/shard-%04d.tar"
+maxcount = 50

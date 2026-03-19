@@ -1,48 +1,66 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
 [project]
 name = "nudemo"
 version = "0.1.0"
-description = "nuScenes ML dataset generation pipeline scaffold"
+description = "nuScenes mini dataset generation and benchmarking pipeline."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-license = { text = "Proprietary" }
-authors = [{ name = "cosmobean" }]
+license = { text = "MIT" }
+authors = [
+  { name = "cosmobean", email = "cosmobean.dev@gmail.com" },
+]
+dependencies = [
+  "numpy>=1.26,<2",
+  "Pillow>=11.0,<12",
+]
 
-[dependency-groups]
+[project.optional-dependencies]
 pipeline = [
-  "confluent-kafka>=2.13.2,<3",
+  "psycopg[binary]>=3.2,<4",
   "minio>=7.2,<8",
-  "psycopg2-binary>=2.9,<3",
-  "redis>=5,<6",
-  "pyarrow>=17,<19",
+  "redis>=5.2,<6",
+  "pyarrow>=19.0,<20",
   "lance>=1.2.1,<2",
-  "webdataset>=0.2.111,<1",
-  "nuscenes-devkit>=1.2.0,<2",
+  "webdataset>=1.0.2,<2",
+  "confluent-kafka>=2.13,<3",
 ]
 training = [
-  "numpy>=1.26,<3",
-  "pandas>=2.2,<3",
-  "pillow>=10,<12",
-  "torch>=2.4,<3",
-  "torchvision>=0.19,<1",
-  "tqdm>=4.66,<5",
+  "torch>=2.6,<3",
+  "torchvision>=0.21,<1",
 ]
-dashboard = [
+reporting = [
+  "pandas>=2.2,<3",
+  "plotly>=6.0,<7",
   "dash>=2.18,<3",
-  "plotly>=5.24,<6",
+]
+dataset = [
+  "nuscenes-devkit>=1.2.0,<2",
+  "tqdm>=4.67,<5",
 ]
 dev = [
   "pytest>=8.3,<9",
-  "ruff>=0.6,<1",
-  "mypy>=1.11,<2",
+  "ruff>=0.11,<0.12",
 ]
 
-[tool.uv]
-package = false
+[project.scripts]
+nudemo = "nudemo.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nudemo"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-q"
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["E402", "E501"]

@@ -1,14 +1,12 @@
-/.venv/
-/.ruff_cache/
-/.mypy_cache/
-/.pytest_cache/
-/__pycache__/
-/data/
-/artifacts/
-/benchmark_results.*
-/dist/
-/build/
-*.log
-*.tmp
-.DS_Store
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+artifacts/
+data/
+*.egg-info/
+*.pyc
 
