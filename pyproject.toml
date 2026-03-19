@@ -1,0 +1,48 @@
+[project]
+name = "nudemo"
+version = "0.1.0"
+description = "nuScenes ML dataset generation pipeline scaffold"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "Proprietary" }
+authors = [{ name = "cosmobean" }]
+
+[dependency-groups]
+pipeline = [
+  "confluent-kafka>=2.13.2,<3",
+  "minio>=7.2,<8",
+  "psycopg2-binary>=2.9,<3",
+  "redis>=5,<6",
+  "pyarrow>=17,<19",
+  "lance>=1.2.1,<2",
+  "webdataset>=0.2.111,<1",
+  "nuscenes-devkit>=1.2.0,<2",
+]
+training = [
+  "numpy>=1.26,<3",
+  "pandas>=2.2,<3",
+  "pillow>=10,<12",
+  "torch>=2.4,<3",
+  "torchvision>=0.19,<1",
+  "tqdm>=4.66,<5",
+]
+dashboard = [
+  "dash>=2.18,<3",
+  "plotly>=5.24,<6",
+]
+dev = [
+  "pytest>=8.3,<9",
+  "ruff>=0.6,<1",
+  "mypy>=1.11,<2",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
