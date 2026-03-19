@@ -11,7 +11,21 @@ from nudemo.benchmarks.models import BenchmarkReport
 def load_results(results_path: str | Path) -> list[dict[str, object]]:
     path = Path(results_path)
     with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+        payload = json.load(handle)
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict) and "results" in payload:
+        report = BenchmarkReport.from_dict(payload)
+        return [
+            {
+                "backend": result.backend,
+                "pattern": result.pattern,
+                **result.metrics,
+                **{f"meta_{key}": value for key, value in result.metadata.items()},
+            }
+            for result in report.results
+        ]
+    raise ValueError(f"Unsupported results payload in {path}")
 
 
 def build_app(results_path: str | Path):

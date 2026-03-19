@@ -4,10 +4,26 @@ import argparse
 import json
 from pathlib import Path
 
+from nudemo.benchmarks.backends import (
+    LanceBackend as SimulatedLanceBackend,
+)
+from nudemo.benchmarks.backends import (
+    MinioPostgresBackend as SimulatedMinioPostgresBackend,
+)
+from nudemo.benchmarks.backends import (
+    RedisBackend as SimulatedRedisBackend,
+)
+from nudemo.benchmarks.backends import (
+    WebDatasetBackend as SimulatedWebDatasetBackend,
+)
+from nudemo.benchmarks.export import export_report
+from nudemo.benchmarks.orchestrator import BenchmarkOrchestrator
 from nudemo.benchmarks.runner import BenchmarkRunner, build_write_record, export_records
+from nudemo.benchmarks.synthetic import SyntheticNuScenesDataset
 from nudemo.config import AppConfig
 from nudemo.extraction.providers import resolve_provider
 from nudemo.ingestion.kafka import KafkaBenchmarker, KafkaPayloadEncoder
+from nudemo.reporting.dashboard import build_dashboard_html
 from nudemo.reporting.dashboard import main as dashboard_main
 from nudemo.storage.lance_store import LanceBackend
 from nudemo.storage.minio_postgres import MinioPostgresBackend
@@ -33,6 +49,15 @@ def make_backends(config: AppConfig) -> dict[str, object]:
             shard_pattern=config.storage.webdataset.shard_pattern,
             maxcount=config.storage.webdataset.maxcount,
         ),
+    }
+
+
+def make_simulated_backends() -> dict[str, object]:
+    return {
+        "minio-postgres": SimulatedMinioPostgresBackend(),
+        "redis": SimulatedRedisBackend(),
+        "lance": SimulatedLanceBackend(),
+        "webdataset": SimulatedWebDatasetBackend(),
     }
 
 
@@ -105,9 +130,40 @@ def command_storage(args: argparse.Namespace) -> int:
 
 def command_benchmark(args: argparse.Namespace) -> int:
     config = AppConfig.load(args.config)
-    selected_backends = make_backends(config)
-    if args.backends:
-        selected_backends = {name: selected_backends[name] for name in args.backends}
+    selected_names = args.backends or ["minio-postgres", "redis", "lance", "webdataset"]
+
+    if args.simulate:
+        dataset = SyntheticNuScenesDataset(
+            sample_count=args.limit or config.pipeline.sample_limit,
+            scene_count=config.pipeline.synthetic_scene_count,
+        ).build()
+        backends = [make_simulated_backends()[name] for name in selected_names]
+        report = BenchmarkOrchestrator(
+            dataset,
+            backends,
+            suite_name="nuDemo benchmark suite",
+        ).run(
+            num_runs=args.num_runs,
+            random_sample_count=args.random_sample_count,
+            batch_size=args.batch_size,
+            num_workers=tuple(args.num_workers),
+        )
+        report_path = export_report(report, config.runtime.reports_root / "benchmark_report.json")
+        dashboard_path = config.runtime.reports_root / "benchmark_dashboard.html"
+        dashboard_path.write_text(build_dashboard_html(report), encoding="utf-8")
+        print(
+            json.dumps(
+                {
+                    "report": str(report_path),
+                    "dashboard": str(dashboard_path),
+                    "results": len(report.results),
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    selected_backends = {name: make_backends(config)[name] for name in selected_names}
 
     records = []
     for backend in selected_backends.values():
@@ -168,11 +224,20 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--provider", default="real", choices=["auto", "real", "synthetic"])
     run.add_argument("--limit", type=int, default=None)
     run.add_argument(
+        "--simulate",
+        action="store_true",
+        help="Run the in-memory synthetic benchmark suite instead of live service backends.",
+    )
+    run.add_argument(
         "--backends",
         nargs="*",
         choices=["minio-postgres", "redis", "lance", "webdataset"],
         default=None,
     )
+    run.add_argument("--num-runs", type=int, default=1)
+    run.add_argument("--random-sample-count", type=int, default=10)
+    run.add_argument("--batch-size", type=int, default=4)
+    run.add_argument("--num-workers", nargs="*", type=int, default=[0, 2, 4])
     run.set_defaults(func=command_benchmark)
 
     dashboard = benchmark_sub.add_parser("dashboard")
