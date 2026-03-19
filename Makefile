@@ -34,7 +34,7 @@ else
 BACKENDS_ARGS :=
 endif
 
-.PHONY: help bootstrap bootstrap-legacy check-env doctor cli extract extract-synthetic \
+.PHONY: help bootstrap bootstrap-legacy check-env deps doctor cli extract extract-synthetic \
 	kafka kafka-topics kafka-metadata kafka-full storage storage-minio-postgres storage-redis \
 	storage-lance storage-webdataset benchmark-sim benchmark-real dashboard lint test \
 	clean infra-up infra-down infra-ps infra-logs
@@ -50,6 +50,8 @@ bootstrap-legacy: ## Run the older bootstrap helper
 
 check-env: ## Validate local tooling and project config
 	@bash ./scripts/check_env.sh
+
+deps: infra-up ## Start all compose-backed project dependencies
 
 doctor: ## Inspect runtime, dataset visibility, and dataset counts
 	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) doctor
