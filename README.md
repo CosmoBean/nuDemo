@@ -62,6 +62,7 @@ Inspect persisted telemetry history:
 ```bash
 make telemetry-runs
 make telemetry-dashboard
+make serve-reports
 ```
 
 `make telemetry-dashboard` renders the latest run. To render a specific run, pass its
@@ -70,6 +71,10 @@ make telemetry-dashboard
 ```bash
 make telemetry-dashboard RUN_ID=<run_id>
 ```
+
+`make serve-reports` serves `artifacts/reports/` over `http://127.0.0.1:8787/` by default so the
+generated HTML, JSON, and CSV artifacts can be viewed from a browser or fronted by a reverse proxy
+or tunnel.
 
 ## Real Pipeline Paths
 

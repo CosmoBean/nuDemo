@@ -14,6 +14,9 @@ NUM_RUNS ?= 1
 RANDOM_SAMPLE_COUNT ?= 10
 BATCH_SIZE ?= 4
 NUM_WORKERS ?= 0 2 4
+REPORTS_HOST ?= 127.0.0.1
+REPORTS_PORT ?= 8787
+REPORTS_ROOT ?= $(CURDIR)/artifacts/reports
 EXTRA_ARGS ?=
 DOCKER_COMPOSE ?= docker compose -f config/docker-compose.yml
 
@@ -38,7 +41,7 @@ endif
 .PHONY: help bootstrap bootstrap-legacy check-env deps doctor cli extract extract-synthetic \
 	kafka kafka-topics kafka-metadata kafka-full storage storage-minio-postgres storage-redis \
 	storage-lance storage-webdataset benchmark-sim benchmark-real dashboard telemetry-runs \
-	telemetry-dashboard lint test clean infra-up infra-down infra-ps infra-logs
+	telemetry-dashboard serve-reports lint test clean infra-up infra-down infra-ps infra-logs
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
@@ -107,6 +110,10 @@ telemetry-runs: ## Show recent telemetry runs stored in PostgreSQL
 
 telemetry-dashboard: ## Render telemetry dashboard from PostgreSQL; optional RUN_ID=<id>
 	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) telemetry dashboard $(if $(RUN_ID),--run-id $(RUN_ID),--latest)
+
+serve-reports: ## Serve artifacts/reports over localhost for browser or tunnel access
+	@NUDEMO_REPORTS_ROOT="$(REPORTS_ROOT)" NUDEMO_REPORTS_HOST="$(REPORTS_HOST)" NUDEMO_REPORTS_PORT="$(REPORTS_PORT)" \
+		bash ./scripts/serve_reports.sh
 
 lint: ## Run Ruff over src/ and tests/
 	@$(UV) run --python $(PYTHON) ruff check src tests
