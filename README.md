@@ -1,6 +1,6 @@
 # nuDemo
 
-`nuDemo` is a local execution scaffold for the `project_spec_v2.md` nuScenes pipeline:
+`nuDemo` is a local execution scaffold for a nuScenes data engineering and benchmarking pipeline:
 
 - Real-path code for nuScenes extraction, Kafka ingestion, and MinIO/PostgreSQL, Redis, Lance, and WebDataset storage backends.
 - A synthetic benchmark suite that runs without Docker or the real dataset and produces report artifacts immediately.
