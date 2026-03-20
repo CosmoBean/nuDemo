@@ -704,22 +704,25 @@ def build_explorer_html() -> str:
         background:
           radial-gradient(circle at top right, rgba(84, 54, 252, 0.12), transparent 20%),
           linear-gradient(180deg, #0f0f16 0%, var(--bg) 100%);
+        overflow-x: hidden;
       }
       main {
-        max-width: 1440px;
+        max-width: 1480px;
         margin: 0 auto;
-        padding: 28px 18px 48px;
+        padding: 28px clamp(12px, 1.8vw, 22px) 48px;
       }
       .shell {
         display: grid;
-        grid-template-columns: 320px 1fr 420px;
+        grid-template-columns: minmax(280px, 320px) minmax(0, 1fr) minmax(320px, 380px);
         gap: 18px;
+        align-items: start;
       }
       .panel {
         background: var(--panel);
         border: 3px solid var(--line);
         border-radius: 24px;
         box-shadow: var(--shadow);
+        min-width: 0;
       }
       .sidebar, .detail {
         padding: 20px;
@@ -1095,15 +1098,16 @@ def build_explorer_html() -> str:
         overflow-wrap: anywhere;
         word-break: break-word;
       }
-      @media (max-width: 1260px) {
-        .shell { grid-template-columns: 300px 1fr; }
+      @media (max-width: 1380px) {
+        .shell { grid-template-columns: minmax(280px, 300px) minmax(0, 1fr); }
         .detail { grid-column: 1 / -1; position: static; }
       }
-      @media (max-width: 900px) {
+      @media (max-width: 980px) {
         .shell { grid-template-columns: 1fr; }
         .sidebar { position: static; }
         .camera-grid { grid-template-columns: 1fr; }
         .camera-compare { grid-template-columns: 1fr; }
+        .scene-strip { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
       }
     </style>
   </head>
