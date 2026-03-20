@@ -6,6 +6,7 @@
 - A synthetic benchmark suite that runs without Docker or the real dataset and produces report artifacts immediately.
 - Reporting hooks that export JSON/CSV-style benchmark data and render a lightweight dashboard HTML summary.
 - Persisted telemetry for benchmark runs, including stage spans and Docker service snapshots stored in PostgreSQL when the Docker-backed stack is available.
+- A browser UI for scene search, processed camera previews, LiDAR visualization, storage-format comparison, and Prometheus/Grafana observability views.
 
 ## Quickstart
 
@@ -108,12 +109,25 @@ From the running browser host you can then use:
 - `/explorer`
 - `/benchmark_dashboard.html`
 - `/telemetry_dashboard.html`
+- `/grafana/`
+- `/prometheus/`
 
 `make data-explorer` starts a live browser app on `http://127.0.0.1:8788/` for the ingested
 records. It supports text search over token, scene, location, and annotation category;
 dedicated scene/location/category filters; minimum-annotation filtering; summary cards; `CAM_*`
 previews sourced from MinIO when the camera blobs are available; on-demand processed camera
-comparisons; and an inline LiDAR top-down preview rendered from the stored `.npy` payloads.
+comparisons; an inline LiDAR top-down preview rendered from the stored `.npy` payloads; and a
+storage-format comparison panel that highlights Parquet, Redis, Lance, WebDataset, and
+MinIO+PostgreSQL metrics from the latest benchmark report.
+
+`make deps` also starts Prometheus and Grafana:
+
+- Prometheus: `http://127.0.0.1:9090/prometheus/`
+- Grafana: `http://127.0.0.1:3000/grafana/`
+
+The report browser exports OpenTelemetry-backed Prometheus metrics from the latest persisted
+benchmark run on port `9464` by default, and Prometheus scrapes that endpoint so Grafana can show
+run elapsed time, bottleneck spans, service peaks, and browser request metrics.
 
 ## Visual Inspection
 
@@ -140,8 +154,10 @@ The real integration points are implemented under `src/nudemo/`:
 - `benchmarks/` contains an in-memory orchestration layer for fast local validation and CI.
 - `rendering.py` exports sample contact sheets and scene GIFs into browser-visible artifacts.
 - `telemetry/` persists run history, stage spans, and service snapshots into PostgreSQL and renders a bottleneck dashboard.
+- `observability/` exports the latest persisted telemetry as Prometheus metrics for Grafana.
 
 Local infrastructure definitions live in `config/docker-compose.yml` and `config/init.sql`.
+Prometheus and Grafana provisioning live under `config/prometheus/` and `config/grafana/`.
 
 ## Recommended Architecture
 
@@ -156,7 +172,7 @@ The scaffold follows the architecture in the spec:
 
 ## Current Status
 
-- Verified locally: real nuScenes-mini extraction, Kafka ingestion, MinIO/PostgreSQL, Redis, Lance, and WebDataset benchmark runs, JSON/CSV export, benchmark dashboard HTML generation, telemetry ingestion into PostgreSQL, telemetry dashboard HTML generation, and official trainval archive discovery from the AWS Open Data mirror.
+- Verified locally: real nuScenes-mini extraction, Kafka ingestion, MinIO/PostgreSQL, Redis, Lance, Parquet, and WebDataset benchmark runs, JSON/CSV export, benchmark dashboard HTML generation, telemetry ingestion into PostgreSQL, telemetry dashboard HTML generation, browser-based sample exploration, and official trainval archive discovery from the AWS Open Data mirror.
 - Recent benchmark runs can be queried with `nudemo telemetry runs` and re-rendered with `nudemo telemetry dashboard`.
 - Telemetry is additive. If PostgreSQL or Docker snapshots are unavailable, the benchmark still writes the benchmark report and dashboard artifacts.
 - Target runtime: Python `3.12`; the repo bootstraps that version explicitly because the external stack is not yet a clean Python 3.13 target.

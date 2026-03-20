@@ -238,7 +238,7 @@
             "type": "prometheus",
             "uid": "Prometheus"
           },
-          "expr": "1000 * sum(rate(nudemo_http_request_duration_ms_sum{job=~\"$job\"}[5m])) / sum(rate(nudemo_http_request_duration_ms_count{job=~\"$job\"}[5m]))",
+          "expr": "sum(rate(nudemo_http_request_duration_ms_milliseconds_sum{job=~\"$job\"}[5m])) / sum(rate(nudemo_http_request_duration_ms_milliseconds_count{job=~\"$job\"}[5m]))",
           "legendFormat": "avg latency",
           "refId": "A"
         }

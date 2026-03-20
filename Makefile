@@ -75,7 +75,7 @@ bootstrap-legacy: ## Run the older bootstrap helper
 check-env: ## Validate local tooling and project config
 	@bash ./scripts/check_env.sh
 
-deps: infra-up ## Start all compose-backed project dependencies
+deps: infra-up ## Start all compose-backed project dependencies, including Prometheus and Grafana
 
 doctor: ## Inspect runtime, dataset visibility, and dataset counts
 	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) doctor
@@ -170,7 +170,7 @@ clean: ## Remove common generated artifacts
 	@rm -rf .pytest_cache .ruff_cache .mypy_cache build dist artifacts *.egg-info
 	@find src tests -type d -name '__pycache__' -prune -exec rm -rf {} +
 
-infra-up: ## Start Kafka, MinIO, PostgreSQL, and Redis via docker compose
+infra-up: ## Start Kafka, MinIO, PostgreSQL, Redis, Prometheus, and Grafana via docker compose
 	@if ! command -v docker >/dev/null 2>&1; then echo "docker is not installed"; exit 1; fi
 	@$(DOCKER_COMPOSE) up -d
 
