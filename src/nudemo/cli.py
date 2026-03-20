@@ -33,6 +33,7 @@ from nudemo.domain.models import CAMERAS, RADARS
 from nudemo.explorer import create_explorer_app
 from nudemo.extraction.providers import resolve_provider
 from nudemo.ingestion.kafka import KafkaBenchmarker, KafkaPayloadEncoder
+from nudemo.rendering import render_sample_contact_sheet, render_scene_gif
 from nudemo.reporting.dashboard import build_dashboard_html
 from nudemo.reporting.dashboard import main as dashboard_main
 from nudemo.storage.lance_store import LanceBackend
@@ -532,6 +533,53 @@ def command_explore(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_render_sample(args: argparse.Namespace) -> int:
+    config = AppConfig.load(args.config)
+    output_path = Path(args.output) if args.output else None
+    artifact = render_sample_contact_sheet(
+        config,
+        sample_idx=args.sample_idx,
+        provider_name=args.provider,
+        output_path=output_path,
+    )
+    print(
+        json.dumps(
+            {
+                "artifact_type": artifact.artifact_type,
+                "output": str(artifact.output_path),
+                "metadata": artifact.metadata,
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+def command_render_scene(args: argparse.Namespace) -> int:
+    config = AppConfig.load(args.config)
+    output_path = Path(args.output) if args.output else None
+    artifact = render_scene_gif(
+        config,
+        scene_name=args.scene_name,
+        camera=args.camera,
+        max_frames=args.max_frames,
+        step=args.step,
+        fps=args.fps,
+        output_path=output_path,
+    )
+    print(
+        json.dumps(
+            {
+                "artifact_type": artifact.artifact_type,
+                "output": str(artifact.output_path),
+                "metadata": artifact.metadata,
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="nudemo")
     parser.add_argument("--config", default=None)
@@ -591,6 +639,24 @@ def build_parser() -> argparse.ArgumentParser:
     explore.add_argument("--limit", type=int, default=200)
     explore.add_argument("--debug", action="store_true")
     explore.set_defaults(func=command_explore)
+
+    render = subparsers.add_parser("render")
+    render_sub = render.add_subparsers(dest="render_command", required=True)
+
+    render_sample = render_sub.add_parser("sample")
+    render_sample.add_argument("--provider", default="real", choices=["auto", "real", "synthetic"])
+    render_sample.add_argument("--sample-idx", type=int, default=0)
+    render_sample.add_argument("--output", default=None)
+    render_sample.set_defaults(func=command_render_sample)
+
+    render_scene = render_sub.add_parser("scene")
+    render_scene.add_argument("--scene-name", default=None)
+    render_scene.add_argument("--camera", default="CAM_FRONT", choices=list(CAMERAS))
+    render_scene.add_argument("--max-frames", type=int, default=24)
+    render_scene.add_argument("--step", type=int, default=1)
+    render_scene.add_argument("--fps", type=int, default=2)
+    render_scene.add_argument("--output", default=None)
+    render_scene.set_defaults(func=command_render_scene)
 
     telemetry = subparsers.add_parser("telemetry")
     telemetry_sub = telemetry.add_subparsers(dest="telemetry_command", required=True)

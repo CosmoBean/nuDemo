@@ -99,14 +99,30 @@ records. It supports text search over token, scene, location, and annotation cat
 location/category filters; minimum-annotation filtering; summary cards; and `CAM_*` previews
 sourced from MinIO when the camera blobs are available.
 
+## Visual Inspection
+
+nuScenes is scene-based. A scene is a temporal driving sequence, while each sample is one
+synchronized sensor snapshot across the six cameras, LiDAR, and radars. This repo now exports both:
+
+```bash
+make render-sample PROVIDER=real SAMPLE_IDX=0
+make render-scene SCENE_NAME=scene-0061 CAMERA=CAM_FRONT MAX_FRAMES=24 FPS=2
+make reports-index
+```
+
+These commands write visual artifacts under `artifacts/reports/renders/`, which are also served by
+the report browser host. `render-sample` creates a camera contact sheet for one sample. `render-scene`
+creates an animated GIF for one camera channel across a scene so you can inspect temporal continuity.
+
 ## Real Pipeline Paths
 
 The real integration points are implemented under `src/nudemo/`:
 
-- `extraction/` loads either nuScenes-mini or a deterministic synthetic fallback.
+- `extraction/` loads either nuScenes data or a deterministic synthetic fallback.
 - `ingestion/` encodes metadata-only and full-payload Kafka messages and exposes topic/bootstrap helpers.
 - `storage/` contains live backends for MinIO+PostgreSQL, Redis, Lance, and WebDataset.
 - `benchmarks/` contains an in-memory orchestration layer for fast local validation and CI.
+- `rendering.py` exports sample contact sheets and scene GIFs into browser-visible artifacts.
 - `telemetry/` persists run history, stage spans, and service snapshots into PostgreSQL and renders a bottleneck dashboard.
 
 Local infrastructure definitions live in `config/docker-compose.yml` and `config/init.sql`.

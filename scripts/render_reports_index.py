@@ -19,6 +19,13 @@ def _links(reports_root: Path) -> list[tuple[str, str]]:
     extra_dashboards = sorted(reports_root.glob("telemetry_dashboard_*.html"))
     for path in extra_dashboards:
         links.append((path.stem.replace("_", " "), path.name))
+    render_artifacts = sorted(
+        path for path in (reports_root / "renders").glob("*") if path.is_file()
+    )
+    for path in render_artifacts:
+        relative_path = path.relative_to(reports_root)
+        label = relative_path.stem.replace("_", " ")
+        links.append((f"Render: {label}", str(relative_path)))
     return links
 
 

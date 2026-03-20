@@ -20,6 +20,13 @@ REPORTS_ROOT ?= $(CURDIR)/artifacts/reports
 EXPLORER_HOST ?= 127.0.0.1
 EXPLORER_PORT ?= 8788
 EXPLORER_LIMIT ?= 200
+SAMPLE_IDX ?= 0
+SCENE_NAME ?=
+CAMERA ?= CAM_FRONT
+MAX_FRAMES ?= 24
+FRAME_STEP ?= 1
+FPS ?= 2
+OUTPUT ?=
 EXTRA_ARGS ?=
 DOCKER_COMPOSE ?= docker compose -f config/docker-compose.yml
 
@@ -43,7 +50,8 @@ endif
 
 .PHONY: help bootstrap bootstrap-legacy check-env deps doctor cli extract extract-synthetic \
 	kafka kafka-topics kafka-metadata kafka-full storage storage-minio-postgres storage-redis \
-	storage-lance storage-webdataset benchmark-sim benchmark-real dashboard telemetry-runs \
+	storage-lance storage-webdataset benchmark-sim benchmark-real dashboard render-sample \
+	render-scene telemetry-runs \
 	telemetry-dashboard reports-index serve-reports data-explorer lint test clean infra-up \
 	infra-down infra-ps infra-logs
 
@@ -108,6 +116,12 @@ benchmark-real: ## Run live backend benchmarks against the configured provider
 
 dashboard: ## Render the benchmark dashboard from RESULTS=...
 	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark dashboard --results-path $(RESULTS)
+
+render-sample: ## Render a sample contact sheet to artifacts/reports/renders; use SAMPLE_IDX=<n>
+	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) render sample --provider $(PROVIDER) --sample-idx $(SAMPLE_IDX) $(if $(OUTPUT),--output $(OUTPUT),) $(EXTRA_ARGS)
+
+render-scene: ## Render a scene GIF to artifacts/reports/renders; optional SCENE_NAME=... CAMERA=... MAX_FRAMES=... FRAME_STEP=... FPS=...
+	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) render scene $(if $(SCENE_NAME),--scene-name $(SCENE_NAME),) --camera $(CAMERA) --max-frames $(MAX_FRAMES) --step $(FRAME_STEP) --fps $(FPS) $(if $(OUTPUT),--output $(OUTPUT),) $(EXTRA_ARGS)
 
 telemetry-runs: ## Show recent telemetry runs stored in PostgreSQL
 	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) telemetry runs --limit $(or $(LIMIT),10)
