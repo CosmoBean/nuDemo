@@ -74,6 +74,21 @@ This writes:
 - `artifacts/reports/benchmark_dashboard.html`
 - `artifacts/reports/telemetry_dashboard.html`
 
+For long-running real-data studies, prefer the batched overnight runner instead of the one-shot
+all-backend benchmark. It streams the selected dataset through one backend at a time in fixed-size
+batches, persists per-batch telemetry into PostgreSQL, renders a per-backend benchmark dashboard,
+renders a per-backend telemetry dashboard, and writes an overall summary bundle. This is the safer
+path for `v1.0-trainval` because it avoids holding a full byte-for-byte copy of every backend on disk
+at the same time.
+
+```bash
+make overnight-study DATASET_VERSION=v1.0-trainval STUDY_BATCH_SIZE=32 BACKENDS="minio-postgres redis lance parquet webdataset"
+```
+
+By default the overnight runner keeps the final `minio-postgres` load in place for the explorer and
+purges the other backends after they are benchmarked. It writes timestamped artifacts under
+`artifacts/reports/overnight/<stamp>/` plus a matching log under `artifacts/logs/`.
+
 Inspect persisted telemetry history:
 
 ```bash
@@ -100,7 +115,7 @@ It reads sample metadata from PostgreSQL and proxies camera images from MinIO, s
 `minio-postgres` backend to be loaded with real or synthetic samples first:
 
 ```bash
-make storage-minio-postgres PROVIDER=real LIMIT=64
+make storage-minio-postgres DATASET_VERSION=v1.0-trainval PROVIDER=real LIMIT=512
 make data-explorer
 ```
 

@@ -16,6 +16,7 @@ RUN_ID ?=
 NUM_RUNS ?= 1
 RANDOM_SAMPLE_COUNT ?= 10
 BATCH_SIZE ?= 4
+STUDY_BATCH_SIZE ?= 32
 NUM_WORKERS ?= 0 2 4
 REPORTS_HOST ?= 127.0.0.1
 REPORTS_PORT ?= 8787
@@ -61,7 +62,7 @@ endif
 	storage-lance storage-parquet storage-webdataset benchmark-sim benchmark-real dashboard render-sample \
 	render-scene download-trainval download-trainval-full telemetry-runs \
 	telemetry-dashboard reports-index serve-reports data-explorer lint test clean infra-up \
-	infra-down infra-ps infra-logs
+	infra-down infra-ps infra-logs overnight-study
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
@@ -159,6 +160,15 @@ serve-reports: ## Serve artifacts/reports over localhost for browser or tunnel a
 data-explorer: ## Serve the searchable ingested-data explorer
 	@NUDEMO_EXPLORER_HOST="$(EXPLORER_HOST)" NUDEMO_EXPLORER_PORT="$(EXPLORER_PORT)" NUDEMO_EXPLORER_LIMIT="$(EXPLORER_LIMIT)" \
 		bash ./scripts/serve_explorer.sh
+
+overnight-study: ## Run the sequential full-data batched ingest study; override EXTRA_ARGS or env vars for tuning
+	@env $(RUN_ENV_VARS) \
+		NUDEMO_STUDY_LIMIT="$(LIMIT)" \
+		NUDEMO_STUDY_BACKENDS="$(BACKENDS)" \
+		NUDEMO_STUDY_PROVIDER="$(PROVIDER)" \
+		NUDEMO_STUDY_RANDOM_SAMPLE_COUNT="$(RANDOM_SAMPLE_COUNT)" \
+		NUDEMO_STUDY_BATCH_SIZE="$(STUDY_BATCH_SIZE)" \
+		bash ./scripts/run_overnight_batched_study.sh $(EXTRA_ARGS)
 
 lint: ## Run Ruff over src/ and tests/
 	@$(UV) run --python $(PYTHON) ruff check src tests
