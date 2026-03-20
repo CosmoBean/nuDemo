@@ -109,6 +109,47 @@ def lidar_payload_to_svg(
 """.strip()
 
 
+def lidar_payload_to_point_cloud(
+    payload: bytes,
+    *,
+    max_points: int = 16000,
+) -> dict[str, object]:
+    points = np.load(io.BytesIO(payload), allow_pickle=False)
+    if points.ndim != 2 or points.shape[1] < 3:
+        raise ValueError("expected lidar array shaped like [N, >=3]")
+    if not len(points):
+        return {
+            "count": 0,
+            "rendered_count": 0,
+            "positions": [],
+            "intensity": [],
+            "bounds": {},
+        }
+
+    original_count = int(len(points))
+    if len(points) > max_points:
+        stride = max(1, len(points) // max_points)
+        points = points[::stride]
+
+    xyz = points[:, :3].astype(np.float32)
+    if points.shape[1] > 3:
+        intensity = points[:, 3].astype(np.float32)
+    else:
+        intensity = np.linalg.norm(xyz[:, :2], axis=1).astype(np.float32)
+
+    return {
+        "count": original_count,
+        "rendered_count": int(len(xyz)),
+        "positions": xyz.reshape(-1).tolist(),
+        "intensity": intensity.tolist(),
+        "bounds": {
+            "x": [float(np.min(xyz[:, 0])), float(np.max(xyz[:, 0]))],
+            "y": [float(np.min(xyz[:, 1])), float(np.max(xyz[:, 1]))],
+            "z": [float(np.min(xyz[:, 2])), float(np.max(xyz[:, 2]))],
+        },
+    }
+
+
 def _empty_svg(*, width: int, height: int, label: str) -> str:
     safe_label = escape(label)
     svg_viewbox = f"0 0 {width} {height}"

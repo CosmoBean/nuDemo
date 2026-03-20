@@ -13,7 +13,11 @@ from fastapi.staticfiles import StaticFiles
 from nudemo.benchmarks.export import load_report
 from nudemo.benchmarks.models import BenchmarkReport, BenchmarkResult
 from nudemo.config import AppConfig
-from nudemo.explorer.media import lidar_payload_to_svg, process_camera_payload
+from nudemo.explorer.media import (
+    lidar_payload_to_point_cloud,
+    lidar_payload_to_svg,
+    process_camera_payload,
+)
 from nudemo.observability import ensure_metrics_exporter, install_http_metrics
 from nudemo.reporting.dashboard import build_recommendation_summary
 
@@ -317,7 +321,7 @@ class ExplorerStore:
                 ORDER BY s.timestamp, s.sample_idx
                 LIMIT %s
                 """,
-                (scene_token, max(1, min(limit, 36))),
+                (scene_token, max(1, min(limit, 240))),
             )
             rows = [dict(row) for row in cursor.fetchall()]
         return [
@@ -338,6 +342,24 @@ class ExplorerStore:
             }
             for row in rows
         ]
+
+    def fetch_scene_detail(self, scene_token: str, *, limit: int = 180) -> dict[str, Any] | None:
+        with self._connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT scene_token, scene_name, location, num_samples
+                FROM scenes
+                WHERE scene_token = %s
+                """,
+                (scene_token,),
+            )
+            scene = cursor.fetchone()
+            if scene is None:
+                return None
+
+        detail = dict(scene)
+        detail["samples"] = self.fetch_scene_samples(scene_token, limit=max(1, min(limit, 240)))
+        return detail
 
     def fetch_sensor_bytes(self, sample_idx: int, sensor: str) -> bytes:
         column_name = SENSOR_COLUMN_MAP.get(sensor)
@@ -620,6 +642,10 @@ def build_browser_home_html() -> str:
               <a href="/explorer">Open explorer</a>
             </div>
             <div class="link-row">
+              <span>Scene player with 3D LiDAR rendering</span>
+              <a href="/scene-studio">Open scene studio</a>
+            </div>
+            <div class="link-row">
               <span>Benchmark comparison dashboard</span>
               <a href="/benchmark_dashboard.html">Open benchmark</a>
             </div>
@@ -650,6 +676,12 @@ def build_browser_home_html() -> str:
           Search by token, scene, location, or annotation category. Compare stored formats against
           Parquet, inspect processed camera images, and preview LiDAR geometry for each sample.
           <a href="/explorer">Go to explorer</a>
+        </section>
+        <section class="card">
+          <strong>Scene Studio</strong>
+          Focus on one scene at a time with a scrubber, live sample switching, and a 3D LiDAR
+          point-cloud viewer driven by the stored nuScenes payloads.
+          <a href="/scene-studio">Open studio</a>
         </section>
         <section class="card">
           <strong>Benchmark Dashboard</strong>
@@ -1115,6 +1147,7 @@ def build_explorer_html() -> str:
     <main>
       <div class="subnav">
         <a href="/">Browser home</a>
+        <a href="/scene-studio">Scene studio</a>
         <a href="/benchmark_dashboard.html">Benchmark dashboard</a>
         <a href="/telemetry_dashboard.html">Telemetry dashboard</a>
         <a href="/grafana/">Grafana</a>
@@ -1218,14 +1251,15 @@ def build_explorer_html() -> str:
     </main>
 
     <script>
+      const initialParams = new URLSearchParams(window.location.search);
       const state = {
-        q: "",
-        scene: "",
-        location: "",
-        category: "",
-        minAnnotations: 0,
-        limit: 24,
-        offset: 0,
+        q: initialParams.get("q") || "",
+        scene: initialParams.get("scene_token") || "",
+        location: initialParams.get("location") || "",
+        category: initialParams.get("category") || "",
+        minAnnotations: Number(initialParams.get("min_annotations") || 0),
+        limit: Number(initialParams.get("limit") || 24),
+        offset: Number(initialParams.get("offset") || 0),
         total: 0,
       };
 
@@ -1252,6 +1286,10 @@ def build_explorer_html() -> str:
         next: document.getElementById("next"),
         detail: document.getElementById("detail_panel"),
       };
+
+      el.q.value = state.q;
+      el.minAnnotations.value = String(state.minAnnotations);
+      el.limit.value = String(state.limit);
 
       function showNotice(message) {
         el.notice.hidden = !message;
@@ -1311,6 +1349,9 @@ def build_explorer_html() -> str:
         el.category.innerHTML = `<option value="">All categories</option>` + filters.categories
           .map((value) => `<option value="${value}">${value}</option>`)
           .join("");
+        el.scene.value = state.scene;
+        el.location.value = state.location;
+        el.category.value = state.category;
       }
 
       function formatMetric(value, digits = 2) {
@@ -1427,6 +1468,9 @@ def build_explorer_html() -> str:
             <span class="chip">${sample.num_lidar_points} LiDAR points</span>
             <span class="chip">token ${sample.token.slice(0, 12)}</span>
             <span class="chip">scene ${sample.scene_token.slice(0, 12)}</span>
+          </div>
+          <div class="button-row" style="margin-top:14px;">
+            <button class="secondary" onclick="window.location.href='/scene-studio?scene_token=${encodeURIComponent(sample.scene_token)}&sample_idx=${sample.sample_idx}'">Open scene studio</button>
           </div>
 
           <h3 style="margin-top:18px;">Scene strip</h3>
@@ -1581,6 +1625,770 @@ def build_explorer_html() -> str:
 """
 
 
+def build_scene_studio_html() -> str:
+    return """
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>nuDemo Scene Studio</title>
+    <style>
+      :root {
+        --bg: #09090e;
+        --panel: #151520;
+        --panel-alt: #101018;
+        --line: #544bb0;
+        --ink: #ececff;
+        --muted: #b7b4d6;
+        --accent: #6b59dd;
+        --accent-soft: #201f31;
+        --shadow: 6px 6px 0 #211b52;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+        background:
+          radial-gradient(circle at top right, rgba(84, 54, 252, 0.14), transparent 24%),
+          linear-gradient(180deg, #0f0f16 0%, var(--bg) 100%);
+        overflow-x: hidden;
+      }
+      main {
+        max-width: 1580px;
+        margin: 0 auto;
+        padding: 24px clamp(12px, 1.8vw, 24px) 52px;
+      }
+      .subnav {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+      }
+      .subnav a {
+        color: var(--ink);
+        font-weight: 700;
+        text-decoration: none;
+        padding: 10px 12px;
+        border: 3px solid var(--line);
+        border-radius: 999px;
+        background: var(--accent-soft);
+        box-shadow: 4px 4px 0 #211b52;
+      }
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(300px, 420px);
+        gap: 16px;
+        margin-bottom: 18px;
+      }
+      .panel {
+        min-width: 0;
+        background: var(--panel);
+        border: 3px solid var(--line);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+      }
+      .hero-panel, .hero-meta, .controls, .timeline-panel, .inspector, .camera-panel, .canvas-panel {
+        padding: 18px;
+      }
+      .hero-panel h1 {
+        margin: 0 0 10px;
+        line-height: 0.98;
+        font-size: clamp(2.3rem, 4vw, 4.1rem);
+        letter-spacing: -0.05em;
+      }
+      .hero-panel p, .hero-meta p, .controls p, .inspector p, .camera-label, .status-line, .annotation-list li, .timeline-card span {
+        color: var(--muted);
+      }
+      .hero-meta {
+        background: var(--panel-alt);
+      }
+      .chip-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 2px solid var(--line);
+        background: var(--accent-soft);
+        color: var(--ink);
+        font-size: 0.82rem;
+        font-weight: 700;
+      }
+      .studio-shell {
+        display: grid;
+        grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+        gap: 18px;
+        align-items: start;
+      }
+      .controls {
+        position: sticky;
+        top: 18px;
+      }
+      .field {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      label, .label {
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+      input, select, button {
+        width: 100%;
+        border: 3px solid var(--line);
+        border-radius: 14px;
+        padding: 11px 12px;
+        font: inherit;
+        background: #201f31;
+        color: var(--ink);
+        box-shadow: 4px 4px 0 #211b52;
+      }
+      button {
+        cursor: pointer;
+        background: var(--accent);
+        font-weight: 700;
+      }
+      button.secondary {
+        background: var(--accent-soft);
+      }
+      .button-row {
+        display: flex;
+        gap: 10px;
+      }
+      .studio-main {
+        display: grid;
+        gap: 18px;
+      }
+      .viewer-meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 14px;
+        align-items: flex-start;
+        margin-bottom: 12px;
+      }
+      .viewer-meta h2 {
+        margin: 0 0 4px;
+      }
+      .status-line {
+        font-size: 0.9rem;
+      }
+      #lidar_canvas {
+        display: block;
+        width: 100%;
+        height: min(68vh, 760px);
+        border-radius: 18px;
+        background:
+          radial-gradient(circle at top left, rgba(107, 89, 221, 0.12), transparent 28%),
+          linear-gradient(180deg, #09090e 0%, #0f0f16 100%);
+      }
+      .studio-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.45fr) minmax(300px, 360px);
+        gap: 18px;
+      }
+      .timeline-strip {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .timeline-card {
+        border: 3px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+        background: var(--panel-alt);
+        box-shadow: 4px 4px 0 #211b52;
+        cursor: pointer;
+        transition: transform 120ms ease;
+      }
+      .timeline-card.active {
+        transform: translate(-2px, -2px);
+        box-shadow: 8px 8px 0 #211b52;
+        background: rgba(107, 89, 221, 0.14);
+      }
+      .timeline-card img {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        object-fit: cover;
+        display: block;
+        background: #1f2030;
+      }
+      .timeline-card .body {
+        padding: 10px 12px 12px;
+        display: grid;
+        gap: 6px;
+      }
+      .timeline-card strong {
+        color: var(--ink);
+      }
+      .camera-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+      }
+      .camera-frame {
+        border: 3px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+        background: var(--panel-alt);
+        box-shadow: 4px 4px 0 #211b52;
+      }
+      .camera-frame img {
+        width: 100%;
+        display: block;
+        aspect-ratio: 16 / 9;
+        object-fit: cover;
+        background: #1f2030;
+      }
+      .camera-frame strong {
+        display: block;
+        padding: 10px 12px 0;
+      }
+      .camera-label {
+        display: block;
+        padding: 4px 12px 12px;
+        font-size: 0.86rem;
+      }
+      .inspector-grid {
+        display: grid;
+        gap: 10px;
+      }
+      .metric-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: baseline;
+        padding: 10px 0;
+        border-bottom: 2px dashed var(--line);
+      }
+      .metric-row strong {
+        color: var(--ink);
+      }
+      .annotation-list {
+        list-style: none;
+        padding: 0;
+        margin: 12px 0 0;
+        display: grid;
+        gap: 10px;
+      }
+      .annotation-list li {
+        padding: 10px 12px;
+        border: 2px solid var(--line);
+        border-radius: 14px;
+        background: var(--accent-soft);
+        overflow-wrap: anywhere;
+      }
+      .notice {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: #201f31;
+        color: var(--ink);
+        border: 3px solid var(--line);
+        box-shadow: 4px 4px 0 #211b52;
+        margin-bottom: 12px;
+      }
+      code {
+        font-family: "IBM Plex Mono", monospace;
+        background: var(--accent-soft);
+        color: var(--ink);
+        padding: 2px 6px;
+        border-radius: 8px;
+        overflow-wrap: anywhere;
+      }
+      @media (max-width: 1240px) {
+        .hero, .studio-shell, .studio-grid {
+          grid-template-columns: 1fr;
+        }
+        .controls {
+          position: static;
+        }
+      }
+      @media (max-width: 860px) {
+        .camera-grid {
+          grid-template-columns: 1fr;
+        }
+        .timeline-strip {
+          grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="subnav">
+        <a href="/">Browser home</a>
+        <a href="/explorer">Explorer</a>
+        <a href="/scene-studio">Scene studio</a>
+        <a href="/benchmark_dashboard.html">Benchmark dashboard</a>
+        <a href="/telemetry_dashboard.html">Telemetry dashboard</a>
+        <a href="/grafana/">Grafana</a>
+        <a href="/prometheus/">Prometheus</a>
+      </div>
+
+      <section class="hero">
+        <section class="panel hero-panel">
+          <h1>Scene Studio</h1>
+          <p>
+            Load a real nuScenes scene, scrub across samples, and inspect the LiDAR point cloud in
+            3D while keeping the front camera and annotation context in sync.
+          </p>
+          <div id="scene_chips" class="chip-row"></div>
+        </section>
+        <aside class="panel hero-meta">
+          <h2 style="margin-top:0;">Live browser goals</h2>
+          <p>Use this page to demonstrate scene-level understanding, not just single-sample lookup.</p>
+          <div class="chip-row">
+            <span class="chip">3D LiDAR</span>
+            <span class="chip">Scene scrubber</span>
+            <span class="chip">Real sample payloads</span>
+            <span class="chip">Processed camera diff</span>
+          </div>
+        </aside>
+      </section>
+
+      <div class="studio-shell">
+        <aside class="panel controls">
+          <div id="studio_notice" class="notice" hidden></div>
+          <div class="field">
+            <label for="scene_select">Scene</label>
+            <select id="scene_select"><option value="">Loading scenes…</option></select>
+          </div>
+          <div class="field">
+            <label for="max_points">3D point budget</label>
+            <select id="max_points">
+              <option value="8000">8,000</option>
+              <option value="16000" selected>16,000</option>
+              <option value="32000">32,000</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="processed_mode">Processed camera mode</label>
+            <select id="processed_mode">
+              <option value="edges" selected>Edges</option>
+              <option value="grayscale">Grayscale</option>
+              <option value="contrast">Contrast</option>
+            </select>
+          </div>
+          <div class="button-row" style="margin-bottom:12px;">
+            <button id="load_scene">Load scene</button>
+            <button id="open_search" class="secondary">Back to search</button>
+          </div>
+          <p>
+            The canvas renders the stored <code>LIDAR_TOP.npy</code> payload for the selected
+            sample. Orbit, pan, and zoom are enabled, and the timeline below lets you walk the
+            scene sample by sample.
+          </p>
+        </aside>
+
+        <section class="studio-main">
+          <section class="panel canvas-panel">
+            <div class="viewer-meta">
+              <div>
+                <h2 id="viewer_title">Waiting for scene data…</h2>
+                <div id="viewer_status" class="status-line">Load a scene to start the 3D viewer.</div>
+              </div>
+              <div class="chip-row" id="viewer_chips"></div>
+            </div>
+            <canvas id="lidar_canvas"></canvas>
+          </section>
+
+          <div class="studio-grid">
+            <section class="panel timeline-panel">
+              <h2 style="margin-top:0;">Scene timeline</h2>
+              <div id="scene_timeline" class="timeline-strip"></div>
+            </section>
+
+            <aside class="panel inspector">
+              <h2 style="margin-top:0;">Sample inspector</h2>
+              <div id="sample_inspector" class="inspector-grid">
+                <p>Select a scene sample to inspect its metadata and annotations.</p>
+              </div>
+            </aside>
+          </div>
+
+          <section class="panel camera-panel">
+            <h2 style="margin-top:0;">Front camera compare</h2>
+            <div id="camera_compare" class="camera-grid">
+              <div class="camera-frame">
+                <div style="aspect-ratio:16/9;background:#1f2030;"></div>
+                <strong>Original</strong>
+                <span class="camera-label">Load a sample to preview CAM_FRONT.</span>
+              </div>
+              <div class="camera-frame">
+                <div style="aspect-ratio:16/9;background:#1f2030;"></div>
+                <strong>Processed</strong>
+                <span class="camera-label">Edges, grayscale, or contrast preview.</span>
+              </div>
+            </div>
+          </section>
+        </section>
+      </div>
+    </main>
+
+    <script type="module">
+      import * as THREE from "https://unpkg.com/three@0.180.0/build/three.module.js";
+      import { OrbitControls } from "https://unpkg.com/three@0.180.0/examples/jsm/controls/OrbitControls.js";
+
+      const params = new URLSearchParams(window.location.search);
+
+      const state = {
+        sceneToken: params.get("scene_token") || "",
+        sampleIdx: params.get("sample_idx") ? Number(params.get("sample_idx")) : null,
+        maxPoints: Number(params.get("max_points") || 16000),
+        processedMode: params.get("processed_mode") || "edges",
+        currentScene: null,
+        currentSample: null,
+      };
+
+      const el = {
+        notice: document.getElementById("studio_notice"),
+        sceneSelect: document.getElementById("scene_select"),
+        maxPoints: document.getElementById("max_points"),
+        processedMode: document.getElementById("processed_mode"),
+        loadScene: document.getElementById("load_scene"),
+        openSearch: document.getElementById("open_search"),
+        sceneChips: document.getElementById("scene_chips"),
+        viewerTitle: document.getElementById("viewer_title"),
+        viewerStatus: document.getElementById("viewer_status"),
+        viewerChips: document.getElementById("viewer_chips"),
+        timeline: document.getElementById("scene_timeline"),
+        inspector: document.getElementById("sample_inspector"),
+        cameraCompare: document.getElementById("camera_compare"),
+        canvas: document.getElementById("lidar_canvas"),
+      };
+
+      const viewer = createViewer(el.canvas);
+
+      function showNotice(message) {
+        el.notice.hidden = !message;
+        el.notice.textContent = message || "";
+      }
+
+      function syncQuery() {
+        const next = new URLSearchParams();
+        if (state.sceneToken) next.set("scene_token", state.sceneToken);
+        if (state.sampleIdx !== null && state.sampleIdx !== undefined) next.set("sample_idx", String(state.sampleIdx));
+        next.set("max_points", String(state.maxPoints));
+        next.set("processed_mode", state.processedMode);
+        const query = next.toString();
+        history.replaceState(null, "", query ? `/scene-studio?${query}` : "/scene-studio");
+      }
+
+      async function requestJson(url) {
+        const response = await fetch(url);
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({ detail: "request failed" }));
+          throw new Error(payload.detail || "request failed");
+        }
+        return response.json();
+      }
+
+      function formatNumber(value, digits = 0) {
+        return Number(value || 0).toLocaleString(undefined, {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: digits,
+        });
+      }
+
+      function populateScenes(filters) {
+        const scenes = filters.scenes || [];
+        el.sceneSelect.innerHTML = scenes
+          .map((scene) => `<option value="${scene.scene_token}">${scene.scene_name} · ${scene.location} · ${formatNumber(scene.num_samples)} samples</option>`)
+          .join("");
+
+        if (!state.sceneToken && scenes.length) {
+          state.sceneToken = scenes[0].scene_token;
+        }
+        el.sceneSelect.value = state.sceneToken;
+      }
+
+      function renderSceneHeader(scene) {
+        el.viewerTitle.textContent = `${scene.scene_name} · ${scene.location}`;
+        el.sceneChips.innerHTML = `
+          <span class="chip">${formatNumber(scene.num_samples)} samples</span>
+          <span class="chip">scene ${scene.scene_token.slice(0, 12)}</span>
+          <span class="chip">3D LiDAR active</span>
+        `;
+      }
+
+      function renderTimeline(scene, activeSampleIdx) {
+        const samples = scene.samples || [];
+        if (!samples.length) {
+          el.timeline.innerHTML = "<p>No scene samples available.</p>";
+          return;
+        }
+        el.timeline.innerHTML = samples.map((sample) => `
+          <article class="timeline-card ${sample.sample_idx === activeSampleIdx ? "active" : ""}" data-sample="${sample.sample_idx}">
+            ${sample.preview_url ? `<img loading="lazy" src="${sample.preview_url}" alt="Sample ${sample.sample_idx}">` : `<div style="aspect-ratio:16/9;background:#1f2030;"></div>`}
+            <div class="body">
+              <strong>#${sample.sample_idx}</strong>
+              <span>${formatNumber(sample.num_annotations)} ann · ${formatNumber(sample.num_lidar_points)} pts</span>
+            </div>
+          </article>
+        `).join("");
+        el.timeline.querySelectorAll("[data-sample]").forEach((node) => {
+          node.addEventListener("click", () => loadSample(Number(node.dataset.sample)));
+        });
+      }
+
+      function renderInspector(sample, lidarPayload) {
+        const annotations = (sample.annotations || []).slice(0, 8);
+        el.inspector.innerHTML = `
+          <div class="metric-row"><span>Sample</span><strong>#${sample.sample_idx}</strong></div>
+          <div class="metric-row"><span>Timestamp</span><strong>${formatNumber(sample.timestamp)}</strong></div>
+          <div class="metric-row"><span>Scene</span><strong>${sample.scene_name}</strong></div>
+          <div class="metric-row"><span>Rendered points</span><strong>${formatNumber(lidarPayload.rendered_count)}</strong></div>
+          <div class="metric-row"><span>Total LiDAR points</span><strong>${formatNumber(lidarPayload.count)}</strong></div>
+          <div class="metric-row"><span>Annotations</span><strong>${formatNumber(sample.num_annotations)}</strong></div>
+          <div class="metric-row"><span>Location</span><strong>${sample.location}</strong></div>
+          <div class="metric-row"><span>Token</span><strong><code>${sample.token.slice(0, 16)}</code></strong></div>
+          <h3 style="margin:12px 0 0;">Top annotations</h3>
+          <ul class="annotation-list">
+            ${annotations.map((annotation) => `<li><strong style="color:var(--ink);">${annotation.category}</strong><br>LiDAR ${formatNumber(annotation.num_lidar_pts)} · Radar ${formatNumber(annotation.num_radar_pts)}</li>`).join("") || "<li>No annotations available.</li>"}
+          </ul>
+        `;
+      }
+
+      function renderCameraCompare(sample) {
+        const originalUrl = sample.camera_urls?.CAM_FRONT || "";
+        const processedUrl = originalUrl
+          ? `/api/samples/${sample.sample_idx}/cameras/CAM_FRONT/processed?mode=${encodeURIComponent(state.processedMode)}`
+          : "";
+        const originalLabel = (sample.camera_paths || {}).CAM_FRONT || "CAM_FRONT unavailable";
+        const processedLabel = `Processed CAM_FRONT using ${state.processedMode}.`;
+
+        el.cameraCompare.innerHTML = `
+          <div class="camera-frame">
+            ${originalUrl ? `<img loading="lazy" src="${originalUrl}" alt="CAM_FRONT original">` : `<div style="aspect-ratio:16/9;background:#1f2030;"></div>`}
+            <strong>CAM_FRONT original</strong>
+            <span class="camera-label">${originalLabel}</span>
+          </div>
+          <div class="camera-frame">
+            ${processedUrl ? `<img loading="lazy" src="${processedUrl}" alt="CAM_FRONT processed">` : `<div style="aspect-ratio:16/9;background:#1f2030;"></div>`}
+            <strong>CAM_FRONT processed</strong>
+            <span class="camera-label">${processedLabel}</span>
+          </div>
+        `;
+      }
+
+      async function loadScene(sceneToken, preferredSampleIdx = null) {
+        state.sceneToken = sceneToken;
+        syncQuery();
+        const scene = await requestJson(`/api/scenes/${encodeURIComponent(sceneToken)}`);
+        state.currentScene = scene;
+        renderSceneHeader(scene);
+
+        const firstSample = preferredSampleIdx ?? state.sampleIdx ?? scene.samples?.[0]?.sample_idx ?? null;
+        renderTimeline(scene, firstSample);
+        if (firstSample !== null) {
+          await loadSample(Number(firstSample), { skipSceneReload: true });
+        }
+      }
+
+      async function loadSample(sampleIdx, options = {}) {
+        state.sampleIdx = sampleIdx;
+        syncQuery();
+        const sample = await requestJson(`/api/samples/${sampleIdx}`);
+        const lidar = await requestJson(`/api/samples/${sampleIdx}/lidar/points?max_points=${encodeURIComponent(state.maxPoints)}`);
+        state.currentSample = sample;
+
+        el.viewerStatus.textContent = `${formatNumber(lidar.rendered_count)} of ${formatNumber(lidar.count)} points rendered · sample #${sample.sample_idx}`;
+        el.viewerChips.innerHTML = `
+          <span class="chip">${sample.scene_name}</span>
+          <span class="chip">${formatNumber(sample.num_annotations)} annotations</span>
+          <span class="chip">${state.maxPoints.toLocaleString()} point budget</span>
+        `;
+
+        viewer.setPointCloud(lidar);
+        renderInspector(sample, lidar);
+        renderCameraCompare(sample);
+
+        if (!options.skipSceneReload && sample.scene_token !== state.sceneToken) {
+          await loadScene(sample.scene_token, sample.sample_idx);
+          return;
+        }
+
+        if (state.currentScene) {
+          renderTimeline(state.currentScene, sampleIdx);
+        }
+      }
+
+      function createViewer(canvas) {
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x09090e);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+        const light = new THREE.DirectionalLight(0xffffff, 1.15);
+        light.position.set(16, 18, 10);
+        scene.add(light);
+        scene.add(new THREE.GridHelper(120, 30, 0x544bb0, 0x24233a));
+        scene.add(new THREE.AxesHelper(12));
+
+        const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000);
+        camera.position.set(28, 18, 28);
+
+        const controls = new OrbitControls(camera, canvas);
+        controls.enableDamping = true;
+        controls.target.set(0, 0, 0);
+
+        let cloud = null;
+        let lastWidth = 0;
+        let lastHeight = 0;
+
+        function resize() {
+          const width = canvas.clientWidth || 1;
+          const height = canvas.clientHeight || 1;
+          if (lastWidth !== width || lastHeight !== height) {
+            renderer.setSize(width, height, false);
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            lastWidth = width;
+            lastHeight = height;
+          }
+        }
+
+        function setPointCloud(payload) {
+          if (cloud) {
+            scene.remove(cloud);
+            cloud.geometry.dispose();
+            cloud.material.dispose();
+            cloud = null;
+          }
+
+          const source = payload.positions || [];
+          const intensity = payload.intensity || [];
+          const pointCount = Math.floor(source.length / 3);
+          const positions = new Float32Array(pointCount * 3);
+          const colors = new Float32Array(pointCount * 3);
+
+          let zMin = Infinity;
+          let zMax = -Infinity;
+          for (let idx = 0; idx < pointCount; idx += 1) {
+            const z = source[idx * 3 + 2];
+            zMin = Math.min(zMin, z);
+            zMax = Math.max(zMax, z);
+          }
+          const zSpan = Math.max(0.001, zMax - zMin);
+
+          for (let idx = 0; idx < pointCount; idx += 1) {
+            const x = source[idx * 3];
+            const y = source[idx * 3 + 1];
+            const z = source[idx * 3 + 2];
+
+            positions[idx * 3] = x;
+            positions[idx * 3 + 1] = z;
+            positions[idx * 3 + 2] = -y;
+
+            const normalizedZ = (z - zMin) / zSpan;
+            const normalizedI = Math.max(0, Math.min(1, Number(intensity[idx] || 0)));
+            const color = new THREE.Color();
+            color.setHSL(0.78 - normalizedZ * 0.28, 0.86, 0.48 + normalizedI * 0.18);
+            colors[idx * 3] = color.r;
+            colors[idx * 3 + 1] = color.g;
+            colors[idx * 3 + 2] = color.b;
+          }
+
+          const geometry = new THREE.BufferGeometry();
+          geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+          geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+          geometry.computeBoundingSphere();
+
+          const material = new THREE.PointsMaterial({
+            size: 0.11,
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.95,
+          });
+          cloud = new THREE.Points(geometry, material);
+          scene.add(cloud);
+
+          const radius = Math.max(18, geometry.boundingSphere?.radius || 18);
+          camera.position.set(radius * 1.1, radius * 0.58, radius * 1.1);
+          controls.target.set(0, 0, 0);
+          controls.update();
+        }
+
+        function animate() {
+          resize();
+          controls.update();
+          renderer.render(scene, camera);
+          requestAnimationFrame(animate);
+        }
+        animate();
+
+        return { setPointCloud };
+      }
+
+      async function bootstrap() {
+        try {
+          showNotice("");
+          el.maxPoints.value = String(state.maxPoints);
+          el.processedMode.value = state.processedMode;
+
+          const filters = await requestJson("/api/filters");
+          populateScenes(filters);
+          if (!state.sceneToken && filters.scenes?.length) {
+            state.sceneToken = filters.scenes[0].scene_token;
+          }
+          if (state.sceneToken) {
+            await loadScene(state.sceneToken, state.sampleIdx);
+          }
+        } catch (error) {
+          showNotice(error.message);
+        }
+      }
+
+      el.sceneSelect.addEventListener("change", async () => {
+        state.sceneToken = el.sceneSelect.value;
+        state.sampleIdx = null;
+        await bootstrap();
+      });
+
+      el.maxPoints.addEventListener("change", async () => {
+        state.maxPoints = Number(el.maxPoints.value || 16000);
+        if (state.sampleIdx !== null) {
+          await loadSample(state.sampleIdx, { skipSceneReload: true });
+        }
+      });
+
+      el.processedMode.addEventListener("change", async () => {
+        state.processedMode = el.processedMode.value;
+        syncQuery();
+        if (state.currentSample) {
+          renderCameraCompare(state.currentSample);
+        }
+      });
+
+      el.loadScene.addEventListener("click", async () => {
+        if (el.sceneSelect.value) {
+          state.sceneToken = el.sceneSelect.value;
+          state.sampleIdx = null;
+          await bootstrap();
+        }
+      });
+
+      el.openSearch.addEventListener("click", () => {
+        const next = new URLSearchParams();
+        if (state.sceneToken) next.set("scene_token", state.sceneToken);
+        window.location.href = next.toString() ? `/explorer?${next}` : "/explorer";
+      });
+
+      bootstrap();
+    </script>
+  </body>
+</html>
+"""
+
+
 class ExplorerApplication:
     def __init__(self, app: FastAPI) -> None:
         self._app = app
@@ -1621,6 +2429,10 @@ def create_app(
     @app.get("/explorer", response_class=HTMLResponse)
     def explorer_page() -> str:
         return build_explorer_html()
+
+    @app.get("/scene-studio", response_class=HTMLResponse)
+    def scene_studio_page() -> str:
+        return build_scene_studio_html()
 
     @app.get("/api/summary")
     def api_summary() -> dict[str, Any]:
@@ -1747,6 +2559,26 @@ def create_app(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return Response(content=svg, media_type="image/svg+xml")
 
+    @app.get("/api/samples/{sample_idx}/lidar/points")
+    def api_sample_lidar_points(
+        sample_idx: int,
+        max_points: int = Query(default=16000, ge=1000, le=64000),
+    ) -> dict[str, Any]:
+        try:
+            payload = store.fetch_sensor_bytes(sample_idx, "LIDAR_TOP")
+            return lidar_payload_to_point_cloud(payload, max_points=max_points)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="LiDAR sensor is not available") from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"LiDAR payload for sample {sample_idx} was not found",
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     @app.get("/api/scenes/{scene_token}/samples")
     def api_scene_samples(
         scene_token: str,
@@ -1757,6 +2589,19 @@ def create_app(
         except Exception as exc:  # pragma: no cover - depends on external services
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return {"scene_token": scene_token, "items": items}
+
+    @app.get("/api/scenes/{scene_token}")
+    def api_scene_detail(
+        scene_token: str,
+        limit: int = Query(default=180, ge=1, le=240),
+    ) -> dict[str, Any]:
+        try:
+            scene = store.fetch_scene_detail(scene_token, limit=limit)
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        if scene is None:
+            raise HTTPException(status_code=404, detail=f"scene {scene_token} was not found")
+        return scene
 
     app.mount("/", StaticFiles(directory=config.runtime.reports_root), name="reports")
     return app

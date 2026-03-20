@@ -107,6 +107,7 @@ From the running browser host you can then use:
 
 - `/`
 - `/explorer`
+- `/scene-studio`
 - `/benchmark_dashboard.html`
 - `/telemetry_dashboard.html`
 - `/grafana/`
@@ -116,9 +117,11 @@ From the running browser host you can then use:
 records. It supports text search over token, scene, location, and annotation category;
 dedicated scene/location/category filters; minimum-annotation filtering; summary cards; `CAM_*`
 previews sourced from MinIO when the camera blobs are available; on-demand processed camera
-comparisons; an inline LiDAR top-down preview rendered from the stored `.npy` payloads; and a
+comparisons; an inline LiDAR top-down preview rendered from the stored `.npy` payloads; a
 storage-format comparison panel that highlights Parquet, Redis, Lance, WebDataset, and
-MinIO+PostgreSQL metrics from the latest benchmark report.
+MinIO+PostgreSQL metrics from the latest benchmark report; and a dedicated `/scene-studio`
+surface with scene scrubbing plus browser-side 3D LiDAR rendering from the stored `LIDAR_TOP`
+payloads.
 
 `make deps` also starts Prometheus and Grafana:
 
