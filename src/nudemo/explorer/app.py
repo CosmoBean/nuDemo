@@ -727,6 +727,19 @@ def build_explorer_html() -> str:
         color: var(--ink);
         box-shadow: 3px 3px 0 #2a2170;
       }
+      .path-list li {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
+      }
+      .path-list li span {
+        color: var(--ink);
+        font-weight: 700;
+      }
+      .path-list li code {
+        display: block;
+        width: 100%;
+        padding: 10px 12px;
+      }
       .detail-placeholder {
         display: grid;
         place-items: center;
@@ -1046,7 +1059,7 @@ def build_explorer_html() -> str:
           .join("");
 
         const sensorRows = Object.entries(sample.sensor_paths || {})
-          .map(([sensor, path]) => `<li><span>${sensor}</span><strong>${path || "missing"}</strong></li>`)
+          .map(([sensor, path]) => `<li><span>${sensor}</span><code>${path || "missing"}</code></li>`)
           .join("");
 
         el.detail.innerHTML = `
@@ -1062,7 +1075,7 @@ def build_explorer_html() -> str:
           <div class="camera-grid">${cameraFrames || "<p>No camera blobs available.</p>"}</div>
 
           <h3 style="margin-top:18px;">Sensor object paths</h3>
-          <ul class="list">${sensorRows}</ul>
+          <ul class="list path-list">${sensorRows}</ul>
 
           <h3 style="margin-top:18px;">Annotations</h3>
           <table class="annotation-table">
