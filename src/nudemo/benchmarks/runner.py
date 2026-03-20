@@ -29,6 +29,7 @@ def benchmark_sequential(
     num_runs: int = 3,
 ) -> BenchmarkRecord:
     throughputs: list[float] = []
+    elapsed_seconds: list[float] = []
     total_count = 0
     for _ in range(num_runs):
         t0 = time.perf_counter()
@@ -37,6 +38,7 @@ def benchmark_sequential(
             count += 1
         elapsed = time.perf_counter() - t0
         total_count = count
+        elapsed_seconds.append(elapsed)
         throughputs.append(count / elapsed if elapsed else 0.0)
     return BenchmarkRecord(
         backend=name,
@@ -45,6 +47,7 @@ def benchmark_sequential(
             "throughput_mean": statistics.mean(throughputs) if throughputs else 0.0,
             "throughput_std": statistics.pstdev(throughputs) if len(throughputs) > 1 else 0.0,
             "total_samples": total_count,
+            "elapsed_sec": statistics.mean(elapsed_seconds) if elapsed_seconds else 0.0,
         },
     )
 
@@ -56,12 +59,15 @@ def benchmark_random_access(
     num_runs: int = 3,
 ) -> BenchmarkRecord:
     latencies_ms: list[float] = []
+    elapsed_seconds: list[float] = []
     index_list = list(indices)
     for _ in range(num_runs):
+        run_start = time.perf_counter()
         for sample_idx in index_list:
             t0 = time.perf_counter()
             fetch_fn(sample_idx)
             latencies_ms.append((time.perf_counter() - t0) * 1000)
+        elapsed_seconds.append(time.perf_counter() - run_start)
     sorted_latencies = sorted(latencies_ms)
     return BenchmarkRecord(
         backend=name,
@@ -71,6 +77,7 @@ def benchmark_random_access(
             "latency_p95_ms": _percentile(sorted_latencies, 95),
             "latency_p99_ms": _percentile(sorted_latencies, 99),
             "num_fetches": len(latencies_ms),
+            "elapsed_sec": statistics.mean(elapsed_seconds) if elapsed_seconds else 0.0,
         },
     )
 
@@ -79,12 +86,15 @@ def benchmark_curation_query(
     name: str, query_fn: Callable[[], list[int]], num_runs: int = 3
 ) -> BenchmarkRecord:
     times_ms: list[float] = []
+    elapsed_seconds: list[float] = []
     result_count = 0
     for _ in range(num_runs):
         t0 = time.perf_counter()
         results = query_fn()
         result_count = len(results)
-        times_ms.append((time.perf_counter() - t0) * 1000)
+        elapsed = time.perf_counter() - t0
+        elapsed_seconds.append(elapsed)
+        times_ms.append(elapsed * 1000)
     return BenchmarkRecord(
         backend=name,
         pattern="curation_query",
@@ -92,6 +102,7 @@ def benchmark_curation_query(
             "query_time_ms_mean": statistics.mean(times_ms) if times_ms else 0.0,
             "query_time_ms_std": statistics.pstdev(times_ms) if len(times_ms) > 1 else 0.0,
             "num_results": result_count,
+            "elapsed_sec": statistics.mean(elapsed_seconds) if elapsed_seconds else 0.0,
         },
     )
 
@@ -121,6 +132,7 @@ def benchmark_end_to_end_curation(
             "total_sec_mean": statistics.mean(totals) if totals else 0.0,
             "num_fetched": fetched,
             "per_sample_ms": per_sample_ms,
+            "elapsed_sec": statistics.mean(totals) if totals else 0.0,
         },
     )
 
@@ -225,25 +237,35 @@ def build_live_report(
 class BenchmarkRunner:
     backends: dict[str, StorageBackend]
 
-    def run_storage_suite(self, random_indices: list[int] | None = None) -> list[BenchmarkRecord]:
+    def run_storage_suite(
+        self,
+        random_indices: list[int] | None = None,
+        record_callback: Callable[[BenchmarkRecord], None] | None = None,
+    ) -> list[BenchmarkRecord]:
         indices = [0, 1, 2, 3, 4] if random_indices is None else random_indices
         records: list[BenchmarkRecord] = []
+
+        def append_record(record: BenchmarkRecord) -> None:
+            records.append(record)
+            if record_callback is not None:
+                record_callback(record)
+
         for backend in self.backends.values():
-            records.append(benchmark_sequential(backend.name, backend.sequential_iter, num_runs=1))
+            append_record(benchmark_sequential(backend.name, backend.sequential_iter, num_runs=1))
             try:
-                records.append(
+                append_record(
                     benchmark_random_access(backend.name, backend.fetch, indices, num_runs=1)
                 )
             except NotImplementedError:
                 pass
             try:
-                records.append(
+                append_record(
                     benchmark_curation_query(backend.name, backend.curation_query, num_runs=1)
                 )
             except NotImplementedError:
                 pass
             try:
-                records.append(
+                append_record(
                     benchmark_end_to_end_curation(
                         backend.name,
                         backend.curation_query,
@@ -253,7 +275,7 @@ class BenchmarkRunner:
                 )
             except NotImplementedError:
                 pass
-            records.append(build_disk_record(backend.name, backend.disk_footprint()))
+            append_record(build_disk_record(backend.name, backend.disk_footprint()))
         return records
 
 

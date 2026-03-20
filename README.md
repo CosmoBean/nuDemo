@@ -5,7 +5,7 @@
 - Real-path code for nuScenes extraction, Kafka ingestion, and MinIO/PostgreSQL, Redis, Lance, Parquet, and WebDataset storage backends.
 - A synthetic benchmark suite that runs without Docker or the real dataset and produces report artifacts immediately.
 - Reporting hooks that export JSON/CSV-style benchmark data and render a lightweight dashboard HTML summary.
-- Persisted telemetry for benchmark runs, including stage spans and Docker service snapshots stored in PostgreSQL when the Docker-backed stack is available.
+- Persisted telemetry for benchmark runs, including stage spans and periodic Docker service snapshots stored in PostgreSQL when the Docker-backed stack is available.
 - A browser UI for scene search, processed camera previews, LiDAR visualization, storage-format comparison, and Prometheus/Grafana observability views.
 
 ## Quickstart
@@ -63,7 +63,8 @@ make benchmark-real DATASET_VERSION=v1.0-trainval PROVIDER=real LIMIT=16 BACKEND
 
 `benchmark-real` reloads the selected backends with exactly the requested `LIMIT`, then benchmarks
 extraction, Kafka ingest/consume, storage writes, sequential scans, random access, curation queries,
-and disk footprint.
+and disk footprint. Live runs now persist total elapsed timing for the fetch-side stages as well, so
+the telemetry/Prometheus views can compare ingestion cost against scan and fetch latency more directly.
 
 This writes:
 

@@ -108,7 +108,10 @@ class ReportContractTests(unittest.TestCase):
             any(attributes["service"] == "kafka" for _, attributes in service_measurements)
         )
         self.assertTrue(
-            any(attributes["metric_name"] == "cpu_percent" for _, attributes in service_measurements)
+            any(
+                attributes["metric_name"] == "latest_cpu_percent"
+                for _, attributes in service_measurements
+            )
         )
 
 

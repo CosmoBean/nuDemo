@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -86,6 +87,9 @@ class TelemetryRecorder:
     started_at: datetime
     enabled: bool = True
     errors: list[str] = field(default_factory=list)
+    snapshot_interval_sec: float = 15.0
+    _stop_event: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
+    _snapshot_thread: threading.Thread | None = field(default=None, init=False, repr=False)
 
     @classmethod
     def start(
@@ -133,10 +137,35 @@ class TelemetryRecorder:
         except Exception as exc:  # pragma: no cover - depends on external services
             recorder.enabled = False
             recorder.errors.append(str(exc))
+        recorder.start_periodic_snapshots()
         return recorder
 
     def _connect(self):
         return psycopg.connect(self.settings.dsn, row_factory=dict_row)
+
+    def start_periodic_snapshots(self) -> None:
+        if not self.enabled or self.simulate or self._snapshot_thread is not None:
+            return
+        if self.snapshot_interval_sec <= 0:
+            return
+
+        self._snapshot_thread = threading.Thread(
+            target=self._snapshot_loop,
+            name=f"nudemo-telemetry-{self.run_id}",
+            daemon=True,
+        )
+        self._snapshot_thread.start()
+
+    def stop_periodic_snapshots(self) -> None:
+        self._stop_event.set()
+        thread = self._snapshot_thread
+        if thread is None or not thread.is_alive():
+            return
+        thread.join(timeout=min(max(self.snapshot_interval_sec, 1.0), 5.0))
+
+    def _snapshot_loop(self) -> None:
+        while not self._stop_event.wait(self.snapshot_interval_sec):
+            self.snapshot_services("periodic")
 
     def snapshot_services(self, snapshot_label: str) -> None:
         if not self.enabled or self.simulate:
@@ -235,6 +264,7 @@ class TelemetryRecorder:
         dashboard_path: str | Path | None = None,
         telemetry_dashboard_path: str | Path | None = None,
     ) -> None:
+        self.stop_periodic_snapshots()
         if not self.enabled:
             return
         completed_at = datetime.now(UTC)

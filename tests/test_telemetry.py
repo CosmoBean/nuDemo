@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from nudemo.observability.metrics import build_service_measurements
 from nudemo.telemetry.dashboard import build_telemetry_dashboard_html
 from nudemo.telemetry.docker import (
     parse_byte_size,
@@ -112,3 +113,46 @@ def test_build_telemetry_dashboard_html_contains_observability_sections() -> Non
     assert "Service Peaks" in html
     assert "Span Timeline" in html
     assert "Kafka" in html
+
+
+def test_build_service_measurements_aggregates_latest_and_peak_values() -> None:
+    measurements = build_service_measurements(
+        "run-1",
+        [
+            {
+                "service": "kafka",
+                "snapshot_label": "periodic",
+                "observed_at": "2026-03-19T21:00:00+00:00",
+                "cpu_percent": 0.5,
+                "mem_percent": 1.0,
+                "mem_usage_bytes": 100,
+                "mem_limit_bytes": 200,
+                "net_input_bytes": 10,
+                "net_output_bytes": 20,
+                "block_input_bytes": 1,
+                "block_output_bytes": 2,
+                "pids": 5,
+            },
+            {
+                "service": "kafka",
+                "snapshot_label": "periodic",
+                "observed_at": "2026-03-19T21:00:10+00:00",
+                "cpu_percent": 0.9,
+                "mem_percent": 1.5,
+                "mem_usage_bytes": 150,
+                "mem_limit_bytes": 200,
+                "net_input_bytes": 25,
+                "net_output_bytes": 30,
+                "block_input_bytes": 3,
+                "block_output_bytes": 4,
+                "pids": 6,
+            },
+        ],
+    )
+
+    packed = {attrs["metric_name"]: value for value, attrs in measurements}
+    assert packed["latest_cpu_percent"] == 0.9
+    assert packed["latest_mem_usage_bytes"] == 150.0
+    assert packed["peak_cpu_percent"] == 0.9
+    assert packed["peak_net_input_bytes"] == 25.0
+    assert packed["snapshot_count"] == 2.0

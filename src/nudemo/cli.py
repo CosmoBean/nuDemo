@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
@@ -135,6 +136,7 @@ def _benchmark_kafka(
     config: AppConfig,
     provider_name: str,
     limit: int | None,
+    result_callback: Callable[[BenchmarkResult], None] | None = None,
 ) -> list[BenchmarkResult]:
     def avg_message_kb(payload: dict[str, float | int]) -> float:
         return float(payload["total_mb"]) * 1024 / max(float(payload["messages"]), 1.0)
@@ -159,39 +161,41 @@ def _benchmark_kafka(
             _iter_samples(config, provider_name, limit),
             mode=mode,
         )
-        results.append(
-            BenchmarkResult(
-                stage="ingestion",
-                backend="Kafka",
-                pattern=f"{pattern_base}_produce",
-                metrics={
-                    "throughput_msg_sec": float(produce["throughput_msg_sec"]),
-                    "throughput_mb_sec": float(produce["throughput_mb_sec"]),
-                    "total_mb": float(produce["total_mb"]),
-                    "avg_message_kb": avg_message_kb(produce),
-                },
-                metadata={"topic": topic, "mode": mode},
-                sample_count=int(produce["messages"]),
-                elapsed_sec=float(produce["elapsed_sec"]),
-            )
+        produce_result = BenchmarkResult(
+            stage="ingestion",
+            backend="Kafka",
+            pattern=f"{pattern_base}_produce",
+            metrics={
+                "throughput_msg_sec": float(produce["throughput_msg_sec"]),
+                "throughput_mb_sec": float(produce["throughput_mb_sec"]),
+                "total_mb": float(produce["total_mb"]),
+                "avg_message_kb": avg_message_kb(produce),
+            },
+            metadata={"topic": topic, "mode": mode},
+            sample_count=int(produce["messages"]),
+            elapsed_sec=float(produce["elapsed_sec"]),
         )
+        results.append(produce_result)
+        if result_callback is not None:
+            result_callback(produce_result)
         consume = benchmarker.benchmark_consumer(topic, f"{group_prefix}-{suffix}")
-        results.append(
-            BenchmarkResult(
-                stage="ingestion",
-                backend="Kafka",
-                pattern=f"{pattern_base}_consume",
-                metrics={
-                    "throughput_msg_sec": float(consume["throughput_msg_sec"]),
-                    "throughput_mb_sec": float(consume["throughput_mb_sec"]),
-                    "total_mb": float(consume["total_mb"]),
-                    "avg_message_kb": avg_message_kb(consume),
-                },
-                metadata={"topic": topic, "mode": mode},
-                sample_count=int(consume["messages"]),
-                elapsed_sec=float(consume["elapsed_sec"]),
-            )
+        consume_result = BenchmarkResult(
+            stage="ingestion",
+            backend="Kafka",
+            pattern=f"{pattern_base}_consume",
+            metrics={
+                "throughput_msg_sec": float(consume["throughput_msg_sec"]),
+                "throughput_mb_sec": float(consume["throughput_mb_sec"]),
+                "total_mb": float(consume["total_mb"]),
+                "avg_message_kb": avg_message_kb(consume),
+            },
+            metadata={"topic": topic, "mode": mode},
+            sample_count=int(consume["messages"]),
+            elapsed_sec=float(consume["elapsed_sec"]),
         )
+        results.append(consume_result)
+        if result_callback is not None:
+            result_callback(consume_result)
     return results
 
 
@@ -207,11 +211,14 @@ def _run_live_benchmark(
         recorder.record_result(dataset_result)
         recorder.snapshot_services("post_extraction")
     try:
-        kafka_results = _benchmark_kafka(config, args.provider, args.limit)
+        kafka_results = _benchmark_kafka(
+            config,
+            args.provider,
+            args.limit,
+            result_callback=recorder.record_result if recorder is not None else None,
+        )
         results.extend(kafka_results)
         if recorder is not None:
-            for result in kafka_results:
-                recorder.record_result(result)
             recorder.snapshot_services("post_kafka")
     except Exception as exc:  # pragma: no cover - network/service failures depend on environment
         error_result = BenchmarkResult(
@@ -268,14 +275,16 @@ def _run_live_benchmark(
     runner = BenchmarkRunner(backends=successful_backends)
     random_indices = list(range(min(dataset_summary["samples"], args.random_sample_count)))
     if successful_backends:
-        suite_results = [
-            record_to_result(record)
-            for record in runner.run_storage_suite(random_indices=random_indices)
-        ]
-        results.extend(suite_results)
-        if recorder is not None:
-            for result in suite_results:
+        suite_results: list[BenchmarkResult] = []
+
+        def capture_record(record) -> None:
+            result = record_to_result(record)
+            suite_results.append(result)
+            if recorder is not None:
                 recorder.record_result(result)
+
+        runner.run_storage_suite(random_indices=random_indices, record_callback=capture_record)
+        results.extend(suite_results)
     return dataset_summary, results
 
 

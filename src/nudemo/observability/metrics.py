@@ -100,24 +100,56 @@ def build_service_measurements(
     snapshots: list[dict[str, Any]],
 ) -> list[tuple[float, dict[str, str]]]:
     measurements: list[tuple[float, dict[str, str]]] = []
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for snapshot in snapshots:
-        attrs = {
-            "run_id": run_id,
-            "service": str(snapshot.get("service", "unknown")),
-            "snapshot_label": str(snapshot.get("snapshot_label", "unknown")),
+        grouped.setdefault(str(snapshot.get("service", "unknown")), []).append(snapshot)
+    for service, service_snapshots in grouped.items():
+        latest_snapshot = max(
+            service_snapshots,
+            key=lambda snapshot: str(snapshot.get("observed_at", "")),
+        )
+        latest_values = {
+            "latest_cpu_percent": latest_snapshot.get("cpu_percent"),
+            "latest_mem_percent": latest_snapshot.get("mem_percent"),
+            "latest_mem_usage_bytes": latest_snapshot.get("mem_usage_bytes"),
+            "latest_mem_limit_bytes": latest_snapshot.get("mem_limit_bytes"),
+            "latest_net_input_bytes": latest_snapshot.get("net_input_bytes"),
+            "latest_net_output_bytes": latest_snapshot.get("net_output_bytes"),
+            "latest_block_input_bytes": latest_snapshot.get("block_input_bytes"),
+            "latest_block_output_bytes": latest_snapshot.get("block_output_bytes"),
+            "latest_pids": latest_snapshot.get("pids"),
+            "snapshot_count": len(service_snapshots),
         }
-        values = {
-            "cpu_percent": snapshot.get("cpu_percent"),
-            "mem_percent": snapshot.get("mem_percent"),
-            "mem_usage_bytes": snapshot.get("mem_usage_bytes"),
-            "mem_limit_bytes": snapshot.get("mem_limit_bytes"),
-            "net_input_bytes": snapshot.get("net_input_bytes"),
-            "net_output_bytes": snapshot.get("net_output_bytes"),
-            "block_input_bytes": snapshot.get("block_input_bytes"),
-            "block_output_bytes": snapshot.get("block_output_bytes"),
-            "pids": snapshot.get("pids"),
+        peak_values = {
+            "peak_cpu_percent": max(
+                float(row.get("cpu_percent") or 0.0) for row in service_snapshots
+            ),
+            "peak_mem_percent": max(
+                float(row.get("mem_percent") or 0.0) for row in service_snapshots
+            ),
+            "peak_mem_usage_bytes": max(
+                int(row.get("mem_usage_bytes") or 0) for row in service_snapshots
+            ),
+            "peak_net_input_bytes": max(
+                int(row.get("net_input_bytes") or 0) for row in service_snapshots
+            ),
+            "peak_net_output_bytes": max(
+                int(row.get("net_output_bytes") or 0) for row in service_snapshots
+            ),
+            "peak_block_input_bytes": max(
+                int(row.get("block_input_bytes") or 0) for row in service_snapshots
+            ),
+            "peak_block_output_bytes": max(
+                int(row.get("block_output_bytes") or 0) for row in service_snapshots
+            ),
+            "peak_pids": max(int(row.get("pids") or 0) for row in service_snapshots),
         }
-        measurements.extend(_pack_numeric_values(attrs, values))
+        measurements.extend(
+            _pack_numeric_values(
+                {"run_id": run_id, "service": service},
+                {**latest_values, **peak_values},
+            )
+        )
     return measurements
 
 

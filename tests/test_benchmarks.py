@@ -36,6 +36,22 @@ def test_runner_emits_expected_patterns():
     assert "curation_query" in patterns
     assert "e2e_curation" in patterns
     assert "disk_footprint" in patterns
+    for record in records:
+        if record.pattern == "disk_footprint":
+            continue
+        assert "elapsed_sec" in record.metrics
+
+
+def test_runner_invokes_record_callback_for_each_record():
+    runner = BenchmarkRunner(backends={"fake": FakeBackend()})
+    seen: list[str] = []
+
+    records = runner.run_storage_suite(
+        random_indices=[0, 2],
+        record_callback=lambda record: seen.append(record.pattern),
+    )
+
+    assert seen == [record.pattern for record in records]
 
 
 def test_export_records_writes_json_and_csv(tmp_path: Path):
