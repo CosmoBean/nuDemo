@@ -37,6 +37,10 @@ reporting = [
   "dash>=2.18,<3",
   "fastapi>=0.115,<1",
   "uvicorn>=0.34,<1",
+  "opentelemetry-api>=1.40,<2",
+  "opentelemetry-sdk>=1.40,<2",
+  "opentelemetry-exporter-prometheus>=0.61b0,<1",
+  "prometheus-client>=0.24,<1",
 ]
 dataset = [
   "nuscenes-devkit>=1.2.0,<2",
@@ -45,6 +49,7 @@ dataset = [
 dev = [
   "pytest>=8.3,<9",
   "ruff>=0.11,<0.12",
+  "httpx>=0.28,<1",
 ]
 
 [project.scripts]
