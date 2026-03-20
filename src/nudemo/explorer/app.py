@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 from html import escape
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from nudemo.benchmarks.export import load_report
+from nudemo.benchmarks.models import BenchmarkReport, BenchmarkResult
 from nudemo.config import AppConfig
 from nudemo.explorer.media import lidar_payload_to_svg, process_camera_payload
+from nudemo.observability import ensure_metrics_exporter, install_http_metrics
+from nudemo.reporting.dashboard import build_recommendation_summary
 
 CAMERA_COLUMN_MAP = {
     "CAM_FRONT": "cam_front_path",
@@ -381,6 +386,88 @@ class ExplorerStore:
             response.release_conn()
 
 
+class BenchmarkReportStore:
+    def __init__(self, reports_root: Path) -> None:
+        self._reports_root = reports_root
+
+    def fetch_summary(self) -> dict[str, Any]:
+        report_path = self._reports_root / "benchmark_report.json"
+        if not report_path.exists():
+            raise FileNotFoundError(report_path)
+
+        report = load_report(report_path)
+        format_rows = [
+            self._build_backend_summary(report, backend) for backend in self._storage_backends(report)
+        ]
+        return {
+            "suite_name": report.suite_name,
+            "created_at": report.created_at,
+            "dataset": report.dataset,
+            "recommendations": build_recommendation_summary(report),
+            "storage_formats": format_rows,
+        }
+
+    def _storage_backends(self, report: BenchmarkReport) -> list[str]:
+        ordered = []
+        seen: set[str] = set()
+        for result in report.results:
+            if result.backend == "Kafka" or result.backend == "real":
+                continue
+            if result.backend in seen:
+                continue
+            ordered.append(result.backend)
+            seen.add(result.backend)
+        return ordered
+
+    def _build_backend_summary(self, report: BenchmarkReport, backend: str) -> dict[str, Any]:
+        write_result = self._match(report, backend, "write_throughput")
+        scan_result = self._match(report, backend, "sequential_scan")
+        random_result = self._match(report, backend, "random_access")
+        disk_result = self._match(report, backend, "disk_footprint")
+        curation_result = self._match(report, backend, "curation_query")
+        return {
+            "backend": backend,
+            "write_samples_per_sec": self._metric(
+                write_result, "throughput_samples_per_sec", "throughput"
+            ),
+            "sequential_samples_per_sec": self._metric(
+                scan_result, "throughput_mean", "throughput_samples_per_sec"
+            ),
+            "random_access_p50_ms": self._metric(random_result, "latency_p50_ms"),
+            "disk_mb": self._metric(disk_result, "disk_mb"),
+            "curation_query_ms": self._metric(
+                curation_result, "query_time_ms_mean", "query_time_ms"
+            ),
+            "status": self._status(write_result, scan_result, random_result, disk_result),
+        }
+
+    @staticmethod
+    def _match(report: BenchmarkReport, backend: str, pattern: str) -> BenchmarkResult | None:
+        for result in report.results:
+            if result.backend == backend and result.pattern == pattern:
+                return result
+        return None
+
+    @staticmethod
+    def _metric(result: BenchmarkResult | None, *keys: str) -> float | None:
+        if result is None:
+            return None
+        for key in keys:
+            value = result.metrics.get(key)
+            if isinstance(value, int | float):
+                return float(value)
+        return None
+
+    @staticmethod
+    def _status(*results: BenchmarkResult | None) -> str:
+        statuses = [result.status for result in results if result is not None]
+        if not statuses:
+            return "missing"
+        if any(status != "ok" for status in statuses):
+            return "degraded"
+        return "ok"
+
+
 def build_browser_home_html() -> str:
     return """
 <!doctype html>
@@ -541,6 +628,14 @@ def build_browser_home_html() -> str:
               <a href="/telemetry_dashboard.html">Open telemetry</a>
             </div>
             <div class="link-row">
+              <span>Grafana observability workspace</span>
+              <a href="/grafana/">Open Grafana</a>
+            </div>
+            <div class="link-row">
+              <span>Prometheus scrape and query UI</span>
+              <a href="/prometheus/">Open Prometheus</a>
+            </div>
+            <div class="link-row">
               <span>Static report artifact index</span>
               <a href="/index.html">Open reports</a>
             </div>
@@ -552,8 +647,8 @@ def build_browser_home_html() -> str:
       <div class="card-grid">
         <section class="card">
           <strong>Explorer</strong>
-          Search by token, scene, location, or annotation category. Filter the loaded dataset and
-          inspect camera images and raw metadata for each sample.
+          Search by token, scene, location, or annotation category. Compare stored formats against
+          Parquet, inspect processed camera images, and preview LiDAR geometry for each sample.
           <a href="/explorer">Go to explorer</a>
         </section>
         <section class="card">
@@ -566,6 +661,12 @@ def build_browser_home_html() -> str:
           <strong>Telemetry Dashboard</strong>
           Review span timings, service peaks, and pipeline choke points captured during live runs.
           <a href="/telemetry_dashboard.html">Open telemetry</a>
+        </section>
+        <section class="card">
+          <strong>Grafana + Prometheus</strong>
+          Inspect the OpenTelemetry-backed Prometheus metrics derived from the latest benchmark and
+          service snapshots.
+          <a href="/grafana/">Open observability</a>
         </section>
       </div>
     </main>
@@ -662,6 +763,54 @@ def build_explorer_html() -> str:
         grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
         gap: 14px;
         margin-bottom: 18px;
+      }
+      .compare-panel {
+        padding: 18px;
+        margin-bottom: 18px;
+      }
+      .compare-panel p {
+        margin-bottom: 12px;
+      }
+      .table-wrap {
+        overflow-x: auto;
+        border: 3px solid var(--line);
+        border-radius: 18px;
+        background: #111119;
+        box-shadow: 4px 4px 0 #211b52;
+      }
+      .format-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+      .format-table th, .format-table td {
+        padding: 10px 12px;
+        border-bottom: 2px dashed var(--line);
+        text-align: left;
+        vertical-align: top;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .format-table th {
+        color: var(--ink);
+        background: #1b1b28;
+      }
+      .format-table tbody tr:last-child td {
+        border-bottom: 0;
+      }
+      .format-table .backend-name {
+        color: var(--ink);
+        font-weight: 700;
+      }
+      .format-table .parquet-row {
+        background: rgba(107, 89, 221, 0.12);
+      }
+      .format-table .status-ok {
+        color: #dcd8ff;
+      }
+      .format-table .status-degraded,
+      .format-table .status-missing {
+        color: #f6b7ff;
       }
       .summary-card {
         padding: 16px;
@@ -964,6 +1113,8 @@ def build_explorer_html() -> str:
         <a href="/">Browser home</a>
         <a href="/benchmark_dashboard.html">Benchmark dashboard</a>
         <a href="/telemetry_dashboard.html">Telemetry dashboard</a>
+        <a href="/grafana/">Grafana</a>
+        <a href="/prometheus/">Prometheus</a>
         <a href="/index.html">Report index</a>
       </div>
       <div class="shell">
@@ -1014,6 +1165,29 @@ def build_explorer_html() -> str:
 
         <section class="content">
           <div id="summary" class="summary-grid"></div>
+          <section class="panel compare-panel">
+            <h2 style="margin-bottom: 4px;">Storage Format Comparison</h2>
+            <p id="benchmark_meta">Waiting for the latest benchmark report...</p>
+            <div id="benchmark_recommendations" class="chip-row"></div>
+            <div class="table-wrap">
+              <table class="format-table">
+                <thead>
+                  <tr>
+                    <th>Backend</th>
+                    <th>Write samples/s</th>
+                    <th>Sequential samples/s</th>
+                    <th>Random access p50 ms</th>
+                    <th>Disk MB</th>
+                    <th>Curation ms</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="benchmark_rows">
+                  <tr><td colspan="7">No benchmark report loaded yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
           <div class="results-head">
             <div>
               <h2 style="margin-bottom: 4px;">Loaded samples</h2>
@@ -1062,6 +1236,9 @@ def build_explorer_html() -> str:
         apply: document.getElementById("apply"),
         reset: document.getElementById("reset"),
         summary: document.getElementById("summary"),
+        benchmarkMeta: document.getElementById("benchmark_meta"),
+        benchmarkRecommendations: document.getElementById("benchmark_recommendations"),
+        benchmarkRows: document.getElementById("benchmark_rows"),
         topLocations: document.getElementById("top_locations"),
         topCategories: document.getElementById("top_categories"),
         results: document.getElementById("results"),
@@ -1130,6 +1307,49 @@ def build_explorer_html() -> str:
         el.category.innerHTML = `<option value="">All categories</option>` + filters.categories
           .map((value) => `<option value="${value}">${value}</option>`)
           .join("");
+      }
+
+      function formatMetric(value, digits = 2) {
+        if (value === null || value === undefined || Number.isNaN(Number(value))) {
+          return "n/a";
+        }
+        return Number(value).toLocaleString(undefined, {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: digits,
+        });
+      }
+
+      function renderBenchmarkSummary(payload) {
+        const dataset = payload.dataset || {};
+        const formats = payload.storage_formats || [];
+        el.benchmarkMeta.textContent = [
+          payload.suite_name || "Benchmark report",
+          dataset.provider ? `${dataset.provider} provider` : null,
+          dataset.samples !== undefined ? `${Number(dataset.samples).toLocaleString()} samples` : null,
+          dataset.scenes !== undefined ? `${Number(dataset.scenes).toLocaleString()} scenes` : null,
+        ].filter(Boolean).join(" · ");
+
+        const recommendationEntries = Object.entries(payload.recommendations || {});
+        el.benchmarkRecommendations.innerHTML = recommendationEntries.map(([stage, backend]) => `
+          <span class="chip">${stage.replaceAll("_", " ")}: ${backend}</span>
+        `).join("");
+
+        if (!formats.length) {
+          el.benchmarkRows.innerHTML = `<tr><td colspan="7">No storage backend metrics were found in the latest report.</td></tr>`;
+          return;
+        }
+
+        el.benchmarkRows.innerHTML = formats.map((row) => `
+          <tr class="${row.backend === "Parquet" ? "parquet-row" : ""}">
+            <td class="backend-name">${row.backend}</td>
+            <td>${formatMetric(row.write_samples_per_sec)}</td>
+            <td>${formatMetric(row.sequential_samples_per_sec)}</td>
+            <td>${formatMetric(row.random_access_p50_ms)}</td>
+            <td>${formatMetric(row.disk_mb)}</td>
+            <td>${formatMetric(row.curation_query_ms)}</td>
+            <td class="status-${row.status}">${row.status}</td>
+          </tr>
+        `).join("");
       }
 
       function renderResults(payload) {
@@ -1281,6 +1501,17 @@ def build_explorer_html() -> str:
         renderResults(payload);
       }
 
+      async function loadBenchmarkSummary() {
+        try {
+          const payload = await requestJson("/api/benchmark/summary");
+          renderBenchmarkSummary(payload);
+        } catch (error) {
+          el.benchmarkMeta.textContent = error.message;
+          el.benchmarkRecommendations.innerHTML = "";
+          el.benchmarkRows.innerHTML = `<tr><td colspan="7">Benchmark comparison is unavailable.</td></tr>`;
+        }
+      }
+
       async function loadDetail(sampleIdx) {
         const sample = await requestJson(`/api/samples/${sampleIdx}`);
         renderDetail(sample);
@@ -1334,6 +1565,7 @@ def build_explorer_html() -> str:
       (async () => {
         try {
           await loadFilters();
+          await loadBenchmarkSummary();
           await refresh(true);
         } catch (error) {
           showNotice(error.message);
@@ -1367,9 +1599,12 @@ def create_app(
 ) -> FastAPI:
     config = config or AppConfig.load()
     config.runtime.ensure()
+    ensure_metrics_exporter(config.services.postgres)
     store = ExplorerStore(config)
+    report_store = BenchmarkReportStore(config.runtime.reports_root)
     default_limit = max(1, min(result_limit, 100))
     app = FastAPI(title="nuDemo Browser", docs_url="/docs", redoc_url=None)
+    install_http_metrics(app)
 
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:
@@ -1394,6 +1629,15 @@ def create_app(
     def api_filters() -> dict[str, Any]:
         try:
             return store.fetch_filters()
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/benchmark/summary")
+    def api_benchmark_summary() -> dict[str, Any]:
+        try:
+            return report_store.fetch_summary()
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"{exc} was not found") from exc
         except Exception as exc:  # pragma: no cover - depends on external services
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
