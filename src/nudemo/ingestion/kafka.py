@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import struct
 import time
 from collections.abc import Iterable
@@ -101,12 +102,15 @@ class KafkaBenchmarker:
                 "linger.ms": 50,
                 "batch.num.messages": 16,
                 "compression.type": "lz4",
+                "queue.buffering.max.messages": 1024,
+                "queue.buffering.max.kbytes": 65536,
             }
         )
 
         total_messages = 0
         total_bytes = 0
         topic = self.settings.refined_topic if mode == "metadata-only" else self.settings.raw_topic
+        flush_interval = self._flush_interval(mode)
         t0 = time.perf_counter()
         for sample_idx, sample in enumerate(samples):
             payload = (
@@ -114,9 +118,16 @@ class KafkaBenchmarker:
                 if mode == "metadata-only"
                 else self.encoder.full_payload(sample)
             )
-            producer.produce(topic, key=sample.scene_name.encode("utf-8"), value=payload)
             total_messages += 1
             total_bytes += len(payload)
+            self._produce_with_backpressure(
+                producer,
+                topic=topic,
+                key=sample.scene_name.encode("utf-8"),
+                value=payload,
+                message_count=total_messages,
+                flush_interval=flush_interval,
+            )
         producer.flush()
         elapsed = time.perf_counter() - t0
         return {
@@ -126,6 +137,35 @@ class KafkaBenchmarker:
             "throughput_mb_sec": (total_bytes / (1024 * 1024)) / elapsed if elapsed else 0.0,
             "elapsed_sec": elapsed,
         }
+
+    def _flush_interval(self, mode: str) -> int:
+        env_name = (
+            "NUDEMO_KAFKA_METADATA_FLUSH_INTERVAL"
+            if mode == "metadata-only"
+            else "NUDEMO_KAFKA_FULL_FLUSH_INTERVAL"
+        )
+        default = "256" if mode == "metadata-only" else "8"
+        return max(1, int(os.getenv(env_name, default)))
+
+    def _produce_with_backpressure(
+        self,
+        producer,
+        *,
+        topic: str,
+        key: bytes,
+        value: bytes,
+        message_count: int,
+        flush_interval: int,
+    ) -> None:
+        while True:
+            try:
+                producer.produce(topic, key=key, value=value)
+                producer.poll(0)
+                break
+            except BufferError:
+                producer.poll(0.1)
+        if message_count % flush_interval == 0:
+            producer.flush()
 
     def benchmark_consumer(self, topic: str, group_id: str) -> dict[str, float]:
         _, _, _, Consumer = self._load_kafka()
