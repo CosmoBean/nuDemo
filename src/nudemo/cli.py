@@ -4,7 +4,7 @@ import argparse
 import json
 import time
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -413,7 +413,9 @@ def command_storage(args: argparse.Namespace) -> int:
     config = AppConfig.load(args.config)
     backend = make_backends(config)[args.backend]
     result = backend.write_samples(_iter_samples(config, args.provider, args.limit))
-    print(json.dumps(result.__dict__, indent=2))
+    payload = asdict(result)
+    payload["throughput"] = result.throughput
+    print(json.dumps(payload, indent=2))
     return 0
 
 
