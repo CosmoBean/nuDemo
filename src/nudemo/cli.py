@@ -49,10 +49,19 @@ from nudemo.telemetry.dashboard import build_telemetry_dashboard_html
 from nudemo.telemetry.store import TelemetryRecorder, fetch_recent_runs, fetch_run_bundle
 
 
-def _iter_samples(config: AppConfig, provider_name: str, limit: int | None):
+def _iter_samples(
+    config: AppConfig,
+    provider_name: str,
+    limit: int | None,
+    scene_limit: int | None = None,
+):
     provider = resolve_provider(config, provider_name)
-    effective_limit = limit or config.pipeline.sample_limit
-    return provider.iter_samples(limit=effective_limit)
+    effective_limit = (
+        limit
+        if limit is not None
+        else (None if scene_limit is not None else config.pipeline.sample_limit)
+    )
+    return provider.iter_samples(limit=effective_limit, scene_limit=scene_limit)
 
 
 def _compose_file() -> Path:
@@ -89,6 +98,7 @@ def _benchmark_extraction(
     config: AppConfig,
     provider_name: str,
     limit: int | None,
+    scene_limit: int | None,
 ) -> tuple[BenchmarkResult, dict[str, int | float | str]]:
     t0 = time.perf_counter()
     sample_count = 0
@@ -96,7 +106,7 @@ def _benchmark_extraction(
     total_payload_bytes = 0
     total_annotations = 0
     missing_sensor_count = 0
-    for sample in _iter_samples(config, provider_name, limit):
+    for sample in _iter_samples(config, provider_name, limit, scene_limit):
         sample_count += 1
         scene_names.add(sample.scene_name)
         total_annotations += len(sample.annotations)
@@ -118,6 +128,7 @@ def _benchmark_extraction(
         "samples": sample_count,
         "scenes": len(scene_names),
         "provider": provider_name,
+        "scene_limit": scene_limit if scene_limit is not None else "",
     }
     return (
         BenchmarkResult(
@@ -136,6 +147,7 @@ def _benchmark_kafka(
     config: AppConfig,
     provider_name: str,
     limit: int | None,
+    scene_limit: int | None,
     result_callback: Callable[[BenchmarkResult], None] | None = None,
 ) -> list[BenchmarkResult]:
     def avg_message_kb(payload: dict[str, float | int]) -> float:
@@ -158,7 +170,7 @@ def _benchmark_kafka(
         ("full-payload", "kafka_full_payload", kafka_settings.raw_topic, "full"),
     ]:
         produce = benchmarker.produce_samples(
-            _iter_samples(config, provider_name, limit),
+            _iter_samples(config, provider_name, limit, scene_limit),
             mode=mode,
         )
         produce_result = BenchmarkResult(
@@ -205,7 +217,12 @@ def _run_live_benchmark(
     recorder: TelemetryRecorder | None = None,
 ) -> tuple[dict[str, int | float | str], list[BenchmarkResult]]:
     selected_names = args.backends or ["minio-postgres", "redis", "lance", "parquet", "webdataset"]
-    dataset_result, dataset_summary = _benchmark_extraction(config, args.provider, args.limit)
+    dataset_result, dataset_summary = _benchmark_extraction(
+        config,
+        args.provider,
+        args.limit,
+        args.scene_limit,
+    )
     results: list[BenchmarkResult] = [dataset_result]
     if recorder is not None:
         recorder.record_result(dataset_result)
@@ -215,6 +232,7 @@ def _run_live_benchmark(
             config,
             args.provider,
             args.limit,
+            args.scene_limit,
             result_callback=recorder.record_result if recorder is not None else None,
         )
         results.extend(kafka_results)
@@ -239,7 +257,9 @@ def _run_live_benchmark(
     successful_backends: dict[str, object] = {}
     for name, backend in candidate_backends.items():
         try:
-            write_result = backend.write_samples(_iter_samples(config, args.provider, args.limit))
+            write_result = backend.write_samples(
+                _iter_samples(config, args.provider, args.limit, args.scene_limit)
+            )
         except Exception as exc:  # pragma: no cover - depends on external services
             error_result = BenchmarkResult(
                 stage="storage",
@@ -381,7 +401,7 @@ def command_doctor(args: argparse.Namespace) -> int:
 
 def command_extract(args: argparse.Namespace) -> int:
     config = AppConfig.load(args.config)
-    sample_iter = _iter_samples(config, args.provider, args.limit)
+    sample_iter = _iter_samples(config, args.provider, args.limit, args.scene_limit)
     first_sample = next(sample_iter, None)
     sample_count = 0 if first_sample is None else 1 + sum(1 for _ in sample_iter)
     payload = {
@@ -402,7 +422,7 @@ def command_kafka(args: argparse.Namespace) -> int:
     if args.create_topics:
         benchmarker.create_topics()
     result = benchmarker.produce_samples(
-        _iter_samples(config, args.provider, args.limit),
+        _iter_samples(config, args.provider, args.limit, args.scene_limit),
         mode=args.mode,
     )
     print(json.dumps(result, indent=2))
@@ -412,7 +432,9 @@ def command_kafka(args: argparse.Namespace) -> int:
 def command_storage(args: argparse.Namespace) -> int:
     config = AppConfig.load(args.config)
     backend = make_backends(config)[args.backend]
-    result = backend.write_samples(_iter_samples(config, args.provider, args.limit))
+    result = backend.write_samples(
+        _iter_samples(config, args.provider, args.limit, args.scene_limit)
+    )
     payload = asdict(result)
     payload["throughput"] = result.throughput
     print(json.dumps(payload, indent=2))
@@ -436,8 +458,20 @@ def command_benchmark(args: argparse.Namespace) -> int:
 
     if args.simulate:
         dataset = SyntheticNuScenesDataset(
-            sample_count=args.limit or config.pipeline.sample_limit,
-            scene_count=config.pipeline.synthetic_scene_count,
+            sample_count=(
+                args.limit
+                or (
+                    min(args.scene_limit, config.pipeline.synthetic_scene_count)
+                    * config.pipeline.synthetic_samples_per_scene
+                    if args.scene_limit is not None
+                    else config.pipeline.sample_limit
+                )
+            ),
+            scene_count=(
+                min(args.scene_limit, config.pipeline.synthetic_scene_count)
+                if args.scene_limit is not None
+                else config.pipeline.synthetic_scene_count
+            ),
         ).build()
         backends = [make_simulated_backends()[name] for name in selected_names]
         report = BenchmarkOrchestrator(
@@ -608,11 +642,13 @@ def build_parser() -> argparse.ArgumentParser:
     extract = subparsers.add_parser("extract")
     extract.add_argument("--provider", default="real", choices=["auto", "real", "synthetic"])
     extract.add_argument("--limit", type=int, default=None)
+    extract.add_argument("--scene-limit", type=int, default=None)
     extract.set_defaults(func=command_extract)
 
     kafka = subparsers.add_parser("kafka")
     kafka.add_argument("--provider", default="real", choices=["auto", "real", "synthetic"])
     kafka.add_argument("--limit", type=int, default=None)
+    kafka.add_argument("--scene-limit", type=int, default=None)
     kafka.add_argument("--mode", default="metadata-only", choices=["metadata-only", "full-payload"])
     kafka.add_argument("--create-topics", action="store_true")
     kafka.set_defaults(func=command_kafka)
@@ -624,6 +660,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     storage.add_argument("--provider", default="real", choices=["auto", "real", "synthetic"])
     storage.add_argument("--limit", type=int, default=None)
+    storage.add_argument("--scene-limit", type=int, default=None)
     storage.set_defaults(func=command_storage)
 
     benchmark = subparsers.add_parser("benchmark")
@@ -632,6 +669,7 @@ def build_parser() -> argparse.ArgumentParser:
     run = benchmark_sub.add_parser("run")
     run.add_argument("--provider", default="real", choices=["auto", "real", "synthetic"])
     run.add_argument("--limit", type=int, default=None)
+    run.add_argument("--scene-limit", type=int, default=None)
     run.add_argument(
         "--simulate",
         action="store_true",

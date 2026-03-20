@@ -8,6 +8,7 @@ DATASET_VERSION ?=
 DATASET_ROOT ?=
 RAW_ROOT ?= $(CURDIR)/data/raw/v1.0-trainval
 LIMIT ?=
+SCENE_LIMIT ?=
 BACKEND ?= lance
 MODE ?= metadata-only
 BACKENDS ?=
@@ -17,6 +18,7 @@ NUM_RUNS ?= 1
 RANDOM_SAMPLE_COUNT ?= 10
 BATCH_SIZE ?= 4
 STUDY_BATCH_SIZE ?= 32
+SNAPSHOT_EVERY_BATCHES ?= 1
 NUM_WORKERS ?= 0 2 4
 REPORTS_HOST ?= 127.0.0.1
 REPORTS_PORT ?= 8787
@@ -49,6 +51,12 @@ ifdef LIMIT
 LIMIT_ARGS := --limit $(LIMIT)
 else
 LIMIT_ARGS :=
+endif
+
+ifdef SCENE_LIMIT
+SCENE_LIMIT_ARGS := --scene-limit $(SCENE_LIMIT)
+else
+SCENE_LIMIT_ARGS :=
 endif
 
 ifdef BACKENDS
@@ -85,25 +93,25 @@ cli: ## Run an arbitrary nudemo CLI command via ARGS="..."
 	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) $(ARGS)
 
 extract: ## Extract sample metadata from the configured provider
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) extract --provider $(PROVIDER) $(LIMIT_ARGS) $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) extract --provider $(PROVIDER) $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) $(EXTRA_ARGS)
 
 extract-synthetic: ## Extract one synthetic sample for smoke testing
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) extract --provider synthetic $(LIMIT_ARGS) $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) extract --provider synthetic $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) $(EXTRA_ARGS)
 
 kafka: ## Produce Kafka messages with MODE=metadata-only|full-payload
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) --mode $(MODE) $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) --mode $(MODE) $(EXTRA_ARGS)
 
 kafka-topics: ## Create Kafka topics for the live pipeline
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) --create-topics $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) --create-topics $(EXTRA_ARGS)
 
 kafka-metadata: ## Produce metadata-only Kafka messages
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) --mode metadata-only $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) --mode metadata-only $(EXTRA_ARGS)
 
 kafka-full: ## Produce full-payload Kafka benchmark messages
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) --mode full-payload $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) --mode full-payload $(EXTRA_ARGS)
 
 storage: ## Write samples to one backend via BACKEND=minio-postgres|redis|lance|parquet|webdataset
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) storage $(BACKEND) --provider $(PROVIDER) $(LIMIT_ARGS) $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) storage $(BACKEND) --provider $(PROVIDER) $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) $(EXTRA_ARGS)
 
 storage-minio-postgres: ## Write samples to MinIO + PostgreSQL
 	@$(MAKE) storage BACKEND=minio-postgres PROVIDER=$(PROVIDER) LIMIT="$(LIMIT)" EXTRA_ARGS="$(EXTRA_ARGS)"
@@ -121,10 +129,10 @@ storage-webdataset: ## Write samples to WebDataset
 	@$(MAKE) storage BACKEND=webdataset PROVIDER=$(PROVIDER) LIMIT="$(LIMIT)" EXTRA_ARGS="$(EXTRA_ARGS)"
 
 benchmark-sim: ## Run the in-memory synthetic benchmark suite
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark run --simulate --provider synthetic $(LIMIT_ARGS) $(BACKENDS_ARGS) --num-runs $(NUM_RUNS) --random-sample-count $(RANDOM_SAMPLE_COUNT) --batch-size $(BATCH_SIZE) --num-workers $(NUM_WORKERS) $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark run --simulate --provider synthetic $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) $(BACKENDS_ARGS) --num-runs $(NUM_RUNS) --random-sample-count $(RANDOM_SAMPLE_COUNT) --batch-size $(BATCH_SIZE) --num-workers $(NUM_WORKERS) $(EXTRA_ARGS)
 
 benchmark-real: ## Run live backend benchmarks against the configured provider
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark run --provider $(PROVIDER) $(LIMIT_ARGS) $(BACKENDS_ARGS) --num-runs $(NUM_RUNS) --random-sample-count $(RANDOM_SAMPLE_COUNT) --batch-size $(BATCH_SIZE) --num-workers $(NUM_WORKERS) $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark run --provider $(PROVIDER) $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) $(BACKENDS_ARGS) --num-runs $(NUM_RUNS) --random-sample-count $(RANDOM_SAMPLE_COUNT) --batch-size $(BATCH_SIZE) --num-workers $(NUM_WORKERS) $(EXTRA_ARGS)
 
 dashboard: ## Render the benchmark dashboard from RESULTS=...
 	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark dashboard --results-path $(RESULTS)
@@ -164,10 +172,12 @@ data-explorer: ## Serve the searchable ingested-data explorer
 overnight-study: ## Run the sequential full-data batched ingest study; override EXTRA_ARGS or env vars for tuning
 	@env $(RUN_ENV_VARS) \
 		NUDEMO_STUDY_LIMIT="$(LIMIT)" \
+		NUDEMO_STUDY_SCENE_LIMIT="$(SCENE_LIMIT)" \
 		NUDEMO_STUDY_BACKENDS="$(BACKENDS)" \
 		NUDEMO_STUDY_PROVIDER="$(PROVIDER)" \
 		NUDEMO_STUDY_RANDOM_SAMPLE_COUNT="$(RANDOM_SAMPLE_COUNT)" \
 		NUDEMO_STUDY_BATCH_SIZE="$(STUDY_BATCH_SIZE)" \
+		NUDEMO_SNAPSHOT_EVERY_BATCHES="$(SNAPSHOT_EVERY_BATCHES)" \
 		bash ./scripts/run_overnight_batched_study.sh $(EXTRA_ARGS)
 
 lint: ## Run Ruff over src/ and tests/

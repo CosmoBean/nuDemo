@@ -28,7 +28,11 @@ LOCATIONS = ("boston-seaport", "singapore-onenorth", "singapore-hollandvillage")
 
 
 class SampleProvider(Protocol):
-    def iter_samples(self, limit: int | None = None) -> Iterator[UnifiedSample]:
+    def iter_samples(
+        self,
+        limit: int | None = None,
+        scene_limit: int | None = None,
+    ) -> Iterator[UnifiedSample]:
         ...
 
 
@@ -39,8 +43,15 @@ class SyntheticNuScenesProvider:
     samples_per_scene: int
     seed: int = 7
 
-    def iter_samples(self, limit: int | None = None) -> Iterator[UnifiedSample]:
-        total = self.scene_count * self.samples_per_scene
+    def iter_samples(
+        self,
+        limit: int | None = None,
+        scene_limit: int | None = None,
+    ) -> Iterator[UnifiedSample]:
+        upper_scenes = (
+            self.scene_count if scene_limit is None else min(self.scene_count, scene_limit)
+        )
+        total = upper_scenes * self.samples_per_scene
         upper = total if limit is None else min(total, limit)
         for sample_idx in range(upper):
             yield self._make_sample(sample_idx)
@@ -100,65 +111,85 @@ class NuScenesProvider:
     dataset_root: Path
     version: str = "v1.0-mini"
 
-    def iter_samples(self, limit: int | None = None) -> Iterator[UnifiedSample]:
+    def iter_samples(
+        self,
+        limit: int | None = None,
+        scene_limit: int | None = None,
+    ) -> Iterator[UnifiedSample]:
         from nuscenes.nuscenes import NuScenes
+
+        nusc = NuScenes(version=self.version, dataroot=str(self.dataset_root), verbose=False)
+        if scene_limit is not None:
+            scene_records = nusc.scene[:scene_limit]
+            remaining = limit
+            for scene in scene_records:
+                sample_token = scene["first_sample_token"]
+                while sample_token:
+                    record = nusc.get("sample", sample_token)
+                    yield self._build_sample(nusc, record)
+                    if remaining is not None:
+                        remaining -= 1
+                        if remaining <= 0:
+                            return
+                    sample_token = record["next"] or None
+            return
+
+        records = nusc.sample[:limit] if limit else nusc.sample
+        for record in records:
+            yield self._build_sample(nusc, record)
+
+    def _build_sample(self, nusc, record: dict[str, object]) -> UnifiedSample:
         from nuscenes.utils.data_classes import LidarPointCloud, RadarPointCloud
         from PIL import Image
 
-        nusc = NuScenes(version=self.version, dataroot=str(self.dataset_root), verbose=False)
-        records = nusc.sample[:limit] if limit else nusc.sample
+        scene = nusc.get("scene", record["scene_token"])
+        log = nusc.get("log", scene["log_token"])
+        cameras = {}
+        for camera in CAMERAS:
+            sample_data = nusc.get("sample_data", record["data"][camera])
+            image_path = self.dataset_root / sample_data["filename"]
+            cameras[camera] = np.asarray(Image.open(image_path))
 
-        for record in records:
-            scene = nusc.get("scene", record["scene_token"])
-            log = nusc.get("log", scene["log_token"])
-            cameras = {}
-            for camera in CAMERAS:
-                sample_data = nusc.get("sample_data", record["data"][camera])
-                image_path = self.dataset_root / sample_data["filename"]
-                cameras[camera] = np.asarray(Image.open(image_path))
+        lidar_sd = nusc.get("sample_data", record["data"]["LIDAR_TOP"])
+        lidar_path = self.dataset_root / lidar_sd["filename"]
+        lidar = LidarPointCloud.from_file(str(lidar_path)).points.T.astype(np.float32)
 
-            lidar_sd = nusc.get("sample_data", record["data"]["LIDAR_TOP"])
-            lidar_path = self.dataset_root / lidar_sd["filename"]
-            lidar = LidarPointCloud.from_file(str(lidar_path)).points.T.astype(np.float32)
+        radars = {}
+        for radar in RADARS:
+            radar_sd = nusc.get("sample_data", record["data"][radar])
+            radar_path = self.dataset_root / radar_sd["filename"]
+            radars[radar] = RadarPointCloud.from_file(str(radar_path)).points.T.astype(np.float32)
 
-            radars = {}
-            for radar in RADARS:
-                radar_sd = nusc.get("sample_data", record["data"][radar])
-                radar_path = self.dataset_root / radar_sd["filename"]
-                radars[radar] = (
-                    RadarPointCloud.from_file(str(radar_path)).points.T.astype(np.float32)
+        ego_pose = nusc.get("ego_pose", lidar_sd["ego_pose_token"])
+        annotations = []
+        for annotation_token in record["anns"]:
+            annotation = nusc.get("sample_annotation", annotation_token)
+            annotations.append(
+                AnnotationRecord(
+                    category=annotation["category_name"],
+                    translation=annotation["translation"],
+                    size=annotation["size"],
+                    rotation=annotation["rotation"],
+                    num_lidar_pts=annotation["num_lidar_pts"],
+                    num_radar_pts=annotation["num_radar_pts"],
                 )
-
-            ego_pose = nusc.get("ego_pose", lidar_sd["ego_pose_token"])
-            annotations = []
-            for annotation_token in record["anns"]:
-                annotation = nusc.get("sample_annotation", annotation_token)
-                annotations.append(
-                    AnnotationRecord(
-                        category=annotation["category_name"],
-                        translation=annotation["translation"],
-                        size=annotation["size"],
-                        rotation=annotation["rotation"],
-                        num_lidar_pts=annotation["num_lidar_pts"],
-                        num_radar_pts=annotation["num_radar_pts"],
-                    )
-                )
-
-            sample = UnifiedSample(
-                token=record["token"],
-                timestamp=record["timestamp"],
-                scene_token=record["scene_token"],
-                scene_name=scene["name"],
-                location=log["location"],
-                cameras=cameras,
-                lidar_top=lidar,
-                radars=radars,
-                ego_translation=ego_pose["translation"],
-                ego_rotation=ego_pose["rotation"],
-                annotations=annotations,
             )
-            sample.validate()
-            yield sample
+
+        sample = UnifiedSample(
+            token=record["token"],
+            timestamp=record["timestamp"],
+            scene_token=record["scene_token"],
+            scene_name=scene["name"],
+            location=log["location"],
+            cameras=cameras,
+            lidar_top=lidar,
+            radars=radars,
+            ego_translation=ego_pose["translation"],
+            ego_rotation=ego_pose["rotation"],
+            annotations=annotations,
+        )
+        sample.validate()
+        return sample
 
 
 def resolve_provider(config: AppConfig, provider_name: str = "auto") -> SampleProvider:

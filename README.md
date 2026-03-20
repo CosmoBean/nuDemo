@@ -88,6 +88,8 @@ make overnight-study DATASET_VERSION=v1.0-trainval STUDY_BATCH_SIZE=32 BACKENDS=
 By default the overnight runner keeps the final `minio-postgres` load in place for the explorer and
 purges the other backends after they are benchmarked. It writes timestamped artifacts under
 `artifacts/reports/overnight_runs/<stamp>/` plus a matching log under `artifacts/logs/`.
+If you need a smaller, scene-bounded study window, pass `SCENE_LIMIT=<n>`. For example, `SCENE_LIMIT=200`
+targets the first `200` real scenes instead of all `850`.
 
 ## Runtime Expectations
 
@@ -104,6 +106,9 @@ That measured run is the best anchor for planning. If you run the same full stud
 `minio-postgres`, budget about `2.5 hours`. If you run all five backends sequentially with
 `overnight-study`, budget an actual overnight window, roughly `8-12 hours` on this host. That
 full-sweep estimate is a planning number, not a completed five-backend trainval measurement yet.
+If you need results in roughly `2-3 hours`, use `SCENE_LIMIT=200` and consider setting
+`SNAPSHOT_EVERY_BATCHES=8` so you still capture service pressure without paying the cost of a Docker
+snapshot after every single batch.
 
 The explorer reads the `minio-postgres` backend only. If that backend has been loaded with the full
 trainval set, the explorer and scene studio can show all `850` scenes immediately without waiting

@@ -15,6 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default=None)
     parser.add_argument("--provider", default="real", choices=["auto", "real", "synthetic"])
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--scene-limit", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--random-sample-count", type=int, default=256)
     parser.add_argument("--snapshot-every-batches", type=int, default=1)
@@ -46,6 +47,7 @@ def main() -> int:
         options=StudyOptions(
             provider=args.provider,
             limit=args.limit,
+            scene_limit=args.scene_limit,
             batch_size=args.batch_size,
             random_sample_count=args.random_sample_count,
             snapshot_every_batches=args.snapshot_every_batches,

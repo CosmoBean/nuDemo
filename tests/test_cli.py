@@ -18,7 +18,10 @@ class _FakeBackend:
 def test_command_storage_serializes_slotted_write_result(monkeypatch, capsys):
     monkeypatch.setattr("nudemo.cli.AppConfig.load", lambda _config: object())
     monkeypatch.setattr("nudemo.cli.make_backends", lambda _config: {"fake": _FakeBackend()})
-    monkeypatch.setattr("nudemo.cli._iter_samples", lambda _config, _provider, _limit: iter(()))
+    monkeypatch.setattr(
+        "nudemo.cli._iter_samples",
+        lambda _config, _provider, _limit, _scene_limit=None: iter(()),
+    )
 
     status = command_storage(
         argparse.Namespace(
@@ -26,6 +29,7 @@ def test_command_storage_serializes_slotted_write_result(monkeypatch, capsys):
             backend="fake",
             provider="real",
             limit=1,
+            scene_limit=None,
         )
     )
 

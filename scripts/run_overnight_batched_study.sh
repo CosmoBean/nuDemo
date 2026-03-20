@@ -28,6 +28,7 @@ SNAPSHOT_EVERY_BATCHES="${NUDEMO_SNAPSHOT_EVERY_BATCHES:-1}"
 KEEP_BACKEND="${NUDEMO_KEEP_BACKEND:-minio-postgres}"
 PURGE_AFTER_BACKEND="${NUDEMO_PURGE_AFTER_BACKEND:-1}"
 LIMIT="${NUDEMO_STUDY_LIMIT:-}"
+SCENE_LIMIT="${NUDEMO_STUDY_SCENE_LIMIT:-}"
 
 echo "Starting overnight batched study at $(date --iso-8601=seconds)" | tee -a "${LOG_PATH}"
 echo "Output root: ${REPORT_ROOT}" | tee -a "${LOG_PATH}"
@@ -51,6 +52,10 @@ done
 
 if [[ -n "${LIMIT}" ]]; then
   ARGS+=("--limit" "${LIMIT}")
+fi
+
+if [[ -n "${SCENE_LIMIT}" ]]; then
+  ARGS+=("--scene-limit" "${SCENE_LIMIT}")
 fi
 
 if [[ "${PURGE_AFTER_BACKEND}" == "1" ]]; then

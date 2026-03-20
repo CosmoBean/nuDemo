@@ -43,6 +43,7 @@ from nudemo.telemetry.store import TelemetryRecorder, fetch_run_bundle
 class StudyOptions:
     provider: str = "real"
     limit: int | None = None
+    scene_limit: int | None = None
     batch_size: int = 32
     random_sample_count: int = 256
     snapshot_every_batches: int = 1
@@ -525,6 +526,7 @@ def run_batched_ingest_study(
         "dataset_version": config.pipeline.dataset_version,
         "batch_size": options.batch_size,
         "limit": options.limit,
+        "scene_limit": options.scene_limit,
         "backends": [summary.as_dict() for summary in summaries],
     }
     (output_root / "summary.json").write_text(
@@ -579,6 +581,7 @@ def build_study_summary_html(payload: dict[str, object]) -> str:
     version = payload.get("dataset_version", "n/a")
     batch_size = payload.get("batch_size", "n/a")
     limit = payload.get("limit", "full")
+    scene_limit = payload.get("scene_limit", "full")
     return f"""
     <html>
       <head>
@@ -641,6 +644,7 @@ def build_study_summary_html(payload: dict[str, object]) -> str:
             <p class="muted">Dataset version: <strong>{version}</strong></p>
             <p class="muted">Batch size: <strong>{batch_size}</strong></p>
             <p class="muted">Limit: <strong>{limit}</strong></p>
+            <p class="muted">Scene limit: <strong>{scene_limit}</strong></p>
           </div>
           <div class="table-wrap">
             <table>
@@ -695,6 +699,7 @@ def _run_backend_study(
             config=config,
             provider_name=options.provider,
             limit=options.limit,
+            scene_limit=options.scene_limit,
             batch_size=options.batch_size,
         ):
             batch_count += 1
@@ -763,6 +768,7 @@ def _run_backend_study(
         "provider": options.provider,
         "run_id": run_id,
         "batch_size": options.batch_size,
+        "scene_limit": options.scene_limit,
     }
     report = BenchmarkReport(
         suite_name=f"nuDemo batched ingest study - {backend_key}",
@@ -881,12 +887,13 @@ def iter_sample_batches(
     config: AppConfig,
     provider_name: str,
     limit: int | None,
+    scene_limit: int | None,
     batch_size: int,
 ) -> Iterator[tuple[int, list[UnifiedSample]]]:
     provider = resolve_provider(config, provider_name)
     current: list[UnifiedSample] = []
     start_idx = 0
-    for sample in provider.iter_samples(limit=limit):
+    for sample in provider.iter_samples(limit=limit, scene_limit=scene_limit):
         current.append(sample)
         if len(current) >= batch_size:
             yield start_idx, current
