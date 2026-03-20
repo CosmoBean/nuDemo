@@ -2032,8 +2032,15 @@ def build_scene_studio_html() -> str:
       </div>
     </main>
 
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.180.0/build/three.module.js"
+        }
+      }
+    </script>
     <script type="module">
-      import * as THREE from "https://unpkg.com/three@0.180.0/build/three.module.js";
+      import * as THREE from "three";
       import { OrbitControls } from "https://unpkg.com/three@0.180.0/examples/jsm/controls/OrbitControls.js";
 
       const params = new URLSearchParams(window.location.search);
