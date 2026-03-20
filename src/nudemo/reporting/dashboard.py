@@ -75,22 +75,22 @@ def build_dashboard_html(report: BenchmarkReport) -> str:
       <head>
         <style>
           :root {{
-            --bg: #f6f2e8;
-            --panel: #fffdf8;
-            --line: #131313;
-            --ink: #131313;
-            --muted: #474747;
-            --accent-alt: #ffd84d;
-            --accent-soft: #d7ecff;
-            --shadow: 8px 8px 0 #131313;
+            --bg: #050704;
+            --panel: #10130d;
+            --line: #7e8f45;
+            --ink: #f1f4e6;
+            --muted: #b3bb93;
+            --accent-alt: #768641;
+            --accent-soft: #1b2210;
+            --shadow: 8px 8px 0 #4a5624;
           }}
           body {{
             font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
             margin: 32px;
             color: var(--ink);
             background:
-              radial-gradient(circle at top right, rgba(255, 216, 77, 0.36), transparent 22%),
-              linear-gradient(180deg, #fff8ef 0%, var(--bg) 100%);
+              radial-gradient(circle at top right, rgba(161, 184, 90, 0.18), transparent 22%),
+              linear-gradient(180deg, #090b07 0%, var(--bg) 100%);
           }}
           main {{ max-width: 1440px; margin: 0 auto; }}
           h1, h2 {{ margin-bottom: 12px; }}
@@ -106,7 +106,7 @@ def build_dashboard_html(report: BenchmarkReport) -> str:
             border-radius: 20px;
             padding: 16px;
             background: var(--panel);
-            box-shadow: 6px 6px 0 var(--line);
+            box-shadow: 6px 6px 0 #4a5624;
           }}
           .table-wrap {{
             overflow-x: auto;

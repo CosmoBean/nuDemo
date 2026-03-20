@@ -313,15 +313,15 @@ def build_browser_home_html() -> str:
     <title>nuDemo Browser</title>
     <style>
       :root {
-        --bg: #f6f2e8;
-        --panel: #fffdf8;
-        --line: #131313;
-        --ink: #131313;
-        --muted: #404040;
-        --accent: #ff5d73;
-        --accent-alt: #ffd84d;
-        --accent-soft: #d7ecff;
-        --shadow: 8px 8px 0 #131313;
+        --bg: #050704;
+        --panel: #10130d;
+        --line: #7e8f45;
+        --ink: #f1f4e6;
+        --muted: #b3bb93;
+        --accent: #a1b85a;
+        --accent-alt: #768641;
+        --accent-soft: #1b2210;
+        --shadow: 8px 8px 0 #4a5624;
       }
       * { box-sizing: border-box; }
       body {
@@ -329,8 +329,8 @@ def build_browser_home_html() -> str:
         font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
         color: var(--ink);
         background:
-          radial-gradient(circle at top right, rgba(255, 216, 77, 0.5), transparent 24%),
-          linear-gradient(180deg, #fff9ef 0%, var(--bg) 100%);
+          radial-gradient(circle at top right, rgba(161, 184, 90, 0.18), transparent 24%),
+          linear-gradient(180deg, #090b07 0%, var(--bg) 100%);
       }
       main {
         max-width: 1120px;
@@ -367,10 +367,10 @@ def build_browser_home_html() -> str:
         gap: 8px;
         padding: 7px 12px;
         border-radius: 999px;
-        background: var(--accent-alt);
+        background: var(--accent);
         color: var(--ink);
         border: 2px solid var(--line);
-        box-shadow: 4px 4px 0 var(--line);
+        box-shadow: 4px 4px 0 #4a5624;
         font-size: 0.9rem;
         margin-bottom: 16px;
         font-weight: 700;
@@ -386,7 +386,7 @@ def build_browser_home_html() -> str:
         border: 3px solid var(--line);
         border-radius: 22px;
         padding: 18px;
-        box-shadow: 8px 8px 0 var(--line);
+        box-shadow: var(--shadow);
       }
       .card strong {
         display: block;
@@ -413,9 +413,9 @@ def build_browser_home_html() -> str:
         gap: 16px;
         padding: 14px 16px;
         border-radius: 18px;
-        background: var(--accent-soft);
+        background: #14190e;
         border: 3px solid var(--line);
-        box-shadow: 6px 6px 0 var(--line);
+        box-shadow: 6px 6px 0 #4a5624;
       }
       .link-row a {
         color: var(--ink);
@@ -506,16 +506,16 @@ def build_explorer_html() -> str:
     <title>nuDemo Explorer</title>
     <style>
       :root {
-        --bg: #f6f2e8;
-        --panel: #fffdf8;
-        --line: #131313;
-        --ink: #131313;
-        --muted: #444444;
-        --accent: #ff5d73;
-        --accent-alt: #ffd84d;
-        --accent-soft: #d7ecff;
-        --success-soft: #dcffd8;
-        --shadow: 8px 8px 0 #131313;
+        --bg: #050704;
+        --panel: #10130d;
+        --line: #7e8f45;
+        --ink: #f1f4e6;
+        --muted: #b3bb93;
+        --accent: #a1b85a;
+        --accent-alt: #768641;
+        --accent-soft: #1b2210;
+        --success-soft: #202914;
+        --shadow: 8px 8px 0 #4a5624;
       }
       * { box-sizing: border-box; }
       body {
@@ -523,8 +523,8 @@ def build_explorer_html() -> str:
         font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
         color: var(--ink);
         background:
-          radial-gradient(circle at top right, rgba(255, 216, 77, 0.42), transparent 20%),
-          linear-gradient(180deg, #fff8ef 0%, var(--bg) 100%);
+          radial-gradient(circle at top right, rgba(161, 184, 90, 0.18), transparent 20%),
+          linear-gradient(180deg, #090b07 0%, var(--bg) 100%);
       }
       main {
         max-width: 1440px;
@@ -576,8 +576,8 @@ def build_explorer_html() -> str:
         padding: 10px 12px;
         border: 3px solid var(--line);
         border-radius: 999px;
-        background: var(--accent-alt);
-        box-shadow: 4px 4px 0 var(--line);
+        background: var(--accent-soft);
+        box-shadow: 4px 4px 0 #4a5624;
       }
       .summary-grid {
         display: grid;
@@ -590,7 +590,7 @@ def build_explorer_html() -> str:
         border-radius: 18px;
         background: var(--panel);
         border: 3px solid var(--line);
-        box-shadow: 6px 6px 0 var(--line);
+        box-shadow: 6px 6px 0 #4a5624;
         min-width: 0;
       }
       .summary-card strong {
@@ -620,9 +620,9 @@ def build_explorer_html() -> str:
         border-radius: 14px;
         padding: 11px 12px;
         font: inherit;
-        background: #fffdf8;
+        background: #151a11;
         color: var(--ink);
-        box-shadow: 4px 4px 0 var(--line);
+        box-shadow: 4px 4px 0 #4a5624;
       }
       button {
         cursor: pointer;
@@ -660,7 +660,7 @@ def build_explorer_html() -> str:
         aspect-ratio: 16 / 9;
         object-fit: cover;
         display: block;
-        background: #dde5f2;
+        background: #202914;
       }
       .sample-card .body {
         padding: 14px;
@@ -717,13 +717,15 @@ def build_explorer_html() -> str:
       }
       .list li strong {
         white-space: nowrap;
+        max-width: 100%;
+        justify-self: end;
         align-self: start;
         padding: 3px 8px;
         border: 2px solid var(--line);
         border-radius: 999px;
-        background: var(--accent-alt);
+        background: var(--accent);
         color: var(--ink);
-        box-shadow: 3px 3px 0 var(--line);
+        box-shadow: 3px 3px 0 #4a5624;
       }
       .detail-placeholder {
         display: grid;
@@ -742,14 +744,14 @@ def build_explorer_html() -> str:
         border-radius: 14px;
         overflow: hidden;
         background: var(--panel);
-        box-shadow: 5px 5px 0 var(--line);
+        box-shadow: 5px 5px 0 #4a5624;
       }
       .camera-frame img {
         width: 100%;
         display: block;
         aspect-ratio: 16 / 9;
         object-fit: cover;
-        background: #dde5f2;
+        background: #202914;
       }
       .camera-frame strong {
         display: block;
@@ -787,10 +789,10 @@ def build_explorer_html() -> str:
       .notice {
         padding: 12px 14px;
         border-radius: 16px;
-        background: #fff4e8;
-        color: #8a4b08;
+        background: #171c10;
+        color: #dfe8b9;
         border: 3px solid var(--line);
-        box-shadow: 5px 5px 0 var(--line);
+        box-shadow: 5px 5px 0 #4a5624;
         margin-bottom: 12px;
       }
       code {
@@ -1000,7 +1002,7 @@ def build_explorer_html() -> str:
 
         el.results.innerHTML = payload.items.map((sample) => `
           <article class="panel sample-card" data-sample="${sample.sample_idx}">
-            ${sample.preview_url ? `<img loading="lazy" src="${sample.preview_url}" alt="Sample ${sample.sample_idx}">` : `<div style="aspect-ratio:16/9;background:#dde5f2;"></div>`}
+            ${sample.preview_url ? `<img loading="lazy" src="${sample.preview_url}" alt="Sample ${sample.sample_idx}">` : `<div style="aspect-ratio:16/9;background:#202914;"></div>`}
             <div class="body">
               <h3>#${sample.sample_idx} · ${sample.scene_name}</h3>
               <div class="meta-list">

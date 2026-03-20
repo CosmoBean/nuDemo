@@ -46,21 +46,23 @@ def build_index_html(reports_root: Path) -> str:
     <title>nuDemo Reports</title>
     <style>
       :root {{
-        --bg: #f3f6fb;
-        --panel: #ffffff;
-        --line: #d8e0ec;
-        --ink: #122033;
-        --muted: #5c6b80;
-        --accent: #0f62fe;
+        --bg: #050704;
+        --panel: #10130d;
+        --line: #7e8f45;
+        --ink: #f1f4e6;
+        --muted: #b3bb93;
+        --accent: #a1b85a;
+        --accent-soft: #1b2210;
+        --shadow: 8px 8px 0 #4a5624;
       }}
       * {{ box-sizing: border-box; }}
       body {{
         margin: 0;
-        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
         color: var(--ink);
         background:
-          radial-gradient(circle at top right, rgba(15,98,254,0.16), transparent 28%),
-          linear-gradient(180deg, #f9fbfe 0%, var(--bg) 100%);
+          radial-gradient(circle at top right, rgba(161,184,90,0.18), transparent 28%),
+          linear-gradient(180deg, #090b07 0%, var(--bg) 100%);
       }}
       main {{
         max-width: 960px;
@@ -69,9 +71,9 @@ def build_index_html(reports_root: Path) -> str:
       }}
       .hero, .panel {{
         background: var(--panel);
-        border: 1px solid var(--line);
+        border: 3px solid var(--line);
         border-radius: 20px;
-        box-shadow: 0 24px 48px rgba(18, 32, 51, 0.08);
+        box-shadow: var(--shadow);
       }}
       .hero {{
         padding: 28px;
@@ -95,8 +97,9 @@ def build_index_html(reports_root: Path) -> str:
       .card {{
         padding: 18px;
         border-radius: 16px;
-        background: #f8fbff;
-        border: 1px solid var(--line);
+        background: #171c10;
+        border: 3px solid var(--line);
+        box-shadow: 5px 5px 0 #4a5624;
       }}
       .card strong {{
         display: block;
@@ -116,7 +119,7 @@ def build_index_html(reports_root: Path) -> str:
         justify-content: space-between;
         gap: 16px;
         padding: 14px 20px;
-        border-top: 1px solid var(--line);
+        border-top: 2px solid var(--line);
       }}
       li:first-child {{
         border-top: 0;
@@ -125,18 +128,27 @@ def build_index_html(reports_root: Path) -> str:
         color: var(--accent);
         font-weight: 600;
         text-decoration: none;
+        overflow-wrap: anywhere;
       }}
       a:hover {{
         text-decoration: underline;
       }}
       span {{
         color: var(--muted);
+        min-width: 0;
+        overflow-wrap: anywhere;
       }}
       code {{
         font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
-        background: #edf4ff;
+        background: var(--accent-soft);
         padding: 2px 6px;
         border-radius: 8px;
+      }}
+      @media (max-width: 720px) {{
+        li {{
+          flex-direction: column;
+          align-items: flex-start;
+        }}
       }}
     </style>
   </head>
