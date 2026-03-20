@@ -5,9 +5,18 @@ cd "$(dirname "$0")/.."
 
 STAMP="${NUDEMO_STUDY_STAMP:-$(date +%Y%m%d_%H%M%S)}"
 LOG_DIR="${NUDEMO_LOG_DIR:-artifacts/logs}"
-REPORT_ROOT="${NUDEMO_STUDY_OUTPUT_ROOT:-artifacts/reports/overnight/${STAMP}}"
+REPORT_ROOT_BASE="${NUDEMO_STUDY_OUTPUT_BASE:-artifacts/reports/overnight_runs}"
+REPORT_ROOT="${NUDEMO_STUDY_OUTPUT_ROOT:-${REPORT_ROOT_BASE}/${STAMP}}"
 
-mkdir -p "${LOG_DIR}" "${REPORT_ROOT}"
+mkdir -p "${LOG_DIR}"
+
+if ! mkdir -p "${REPORT_ROOT}" 2>/dev/null; then
+  FALLBACK_ROOT="artifacts/reports/overnight_runs/${STAMP}"
+  echo "Requested output root is not writable: ${REPORT_ROOT}" >&2
+  echo "Falling back to ${FALLBACK_ROOT}" >&2
+  REPORT_ROOT="${FALLBACK_ROOT}"
+  mkdir -p "${REPORT_ROOT}"
+fi
 
 LOG_PATH="${LOG_DIR}/overnight_batched_study_${STAMP}.log"
 
@@ -48,6 +57,6 @@ if [[ "${PURGE_AFTER_BACKEND}" == "1" ]]; then
   ARGS+=("--purge-after-backend")
 fi
 
-uv run --python 3.12 python scripts/overnight_batched_study.py "${ARGS[@]}" 2>&1 | tee -a "${LOG_PATH}"
+uv run --python 3.12 python scripts/overnight_batched_study.py "${ARGS[@]}" "$@" 2>&1 | tee -a "${LOG_PATH}"
 
 echo "Finished overnight batched study at $(date --iso-8601=seconds)" | tee -a "${LOG_PATH}"
