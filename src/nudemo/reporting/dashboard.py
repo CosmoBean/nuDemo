@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
 from statistics import mean
 
@@ -10,8 +11,10 @@ from nudemo.benchmarks.models import BenchmarkReport, BenchmarkResult
 
 __all__ = [
     "DashboardApp",
+    "build_comparison_note",
     "build_dashboard_html",
     "build_recommendation_summary",
+    "build_storage_format_rows",
     "load_results",
 ]
 
@@ -59,7 +62,11 @@ def build_recommendation_summary(report: BenchmarkReport) -> dict[str, str]:
 
 def build_dashboard_html(report: BenchmarkReport) -> str:
     recommendations = build_recommendation_summary(report)
+    storage_rows = build_storage_format_rows(report)
+    comparison_note = build_comparison_note(storage_rows)
     summary_cards = _build_summary_cards(report)
+    comparison_cards = _build_comparison_cards(storage_rows)
+    comparison_table = _build_storage_summary_table(storage_rows)
     stage_table = _build_stage_table(report)
     dataloader_table = _build_dataloader_table(report)
     result_rows = "".join(_build_result_row(result) for result in report.results)
@@ -101,12 +108,60 @@ def build_dashboard_html(report: BenchmarkReport) -> str:
             gap: 12px;
             margin: 16px 0 24px;
           }}
+          .chart-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 12px;
+            margin: 16px 0 24px;
+          }}
           .card {{
             border: 3px solid var(--line);
             border-radius: 20px;
             padding: 16px;
             background: var(--panel);
             box-shadow: 4px 4px 0 #211b52;
+          }}
+          .metric-chart {{
+            border: 3px solid var(--line);
+            border-radius: 20px;
+            padding: 16px;
+            background: var(--panel);
+            box-shadow: 4px 4px 0 #211b52;
+          }}
+          .metric-chart h3 {{ margin: 0 0 6px; }}
+          .metric-chart p {{ margin: 0 0 12px; }}
+          .chart-rows {{
+            display: grid;
+            gap: 10px;
+          }}
+          .chart-row {{
+            display: grid;
+            gap: 6px;
+          }}
+          .chart-row-head {{
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: baseline;
+          }}
+          .chart-track {{
+            width: 100%;
+            height: 14px;
+            border: 2px solid var(--line);
+            border-radius: 999px;
+            background: var(--accent-soft);
+            overflow: hidden;
+          }}
+          .chart-bar {{
+            height: 100%;
+            min-width: 8px;
+            background: linear-gradient(90deg, var(--accent-alt), #8e82e8);
+          }}
+          .backend-meta {{
+            display: block;
+            font-size: 0.82rem;
+            color: var(--muted);
+            margin-top: 3px;
           }}
           .table-wrap {{
             overflow-x: auto;
@@ -153,6 +208,10 @@ def build_dashboard_html(report: BenchmarkReport) -> str:
             Dataset summary: {_format_dataset_summary(report.dataset)}.
           </p>
           <div class="cards">{summary_cards}</div>
+          <h2>Backend Comparison</h2>
+          <p class="muted compact">{escape(comparison_note)}</p>
+          <div class="chart-grid">{comparison_cards}</div>
+          <div class="table-wrap"><table>{comparison_table}</table></div>
           <h2>Recommendation Summary</h2>
           <div class="table-wrap"><table>{recommendation_rows}</table></div>
           <h2>Stage Summary</h2>
@@ -221,6 +280,64 @@ def _build_summary_cards(report: BenchmarkReport) -> str:
     )
 
 
+def build_storage_format_rows(report: BenchmarkReport) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for backend in _storage_backends(report):
+        write_result = _match(report, backend, "write_throughput")
+        batch_results = _matches(report, backend, "batch_ingest")
+        scan_result = _match(report, backend, "sequential_scan")
+        random_result = _match(report, backend, "random_access")
+        disk_result = _match(report, backend, "disk_footprint")
+        curation_result = _match(report, backend, "curation_query")
+        source = _source_metadata(
+            write_result,
+            *batch_results,
+            scan_result,
+            random_result,
+            disk_result,
+            curation_result,
+        )
+        rows.append(
+            {
+                "backend": backend,
+                "write_samples_per_sec": _storage_write_metric(write_result, batch_results),
+                "sequential_samples_per_sec": _metric(
+                    scan_result, "throughput_mean", "throughput_samples_per_sec"
+                ),
+                "random_access_p50_ms": _metric(random_result, "latency_p50_ms"),
+                "disk_mb": _metric(disk_result, "disk_mb"),
+                "curation_query_ms": _metric(
+                    curation_result, "query_time_ms_mean", "query_time_ms"
+                ),
+                "status": _status(
+                    write_result,
+                    *batch_results,
+                    scan_result,
+                    random_result,
+                    disk_result,
+                ),
+                "samples": source.get("source_samples", report.dataset.get("samples")),
+                "scenes": source.get("source_scenes", report.dataset.get("scenes")),
+                "provider": source.get("source_provider", report.dataset.get("provider")),
+                "run_id": source.get("source_run_id", report.dataset.get("run_id")),
+                "created_at": source.get("source_created_at", report.created_at),
+            }
+        )
+    return rows
+
+
+def build_comparison_note(storage_rows: list[dict[str, object]]) -> str:
+    if not storage_rows:
+        return "No storage backend metrics were found."
+    scopes = {(row.get("samples"), row.get("scenes")) for row in storage_rows}
+    if len(scopes) <= 1:
+        return "All backend rows come from the same sample and scene scope."
+    return (
+        "Rows come from the latest completed run for each backend. Sample and scene counts differ "
+        "across backends, so compare relative behavior unless you rerun them on a common slice."
+    )
+
+
 def _build_stage_table(report: BenchmarkReport) -> str:
     rows = []
     for stage in sorted({result.stage for result in report.results}):
@@ -260,6 +377,105 @@ def _build_dataloader_table(report: BenchmarkReport) -> str:
         "<tr><th>Backend</th><th>num_workers</th><th>batch_size</th><th>Throughput</th></tr>"
         + "".join(rows)
     )
+
+
+def _build_comparison_cards(storage_rows: list[dict[str, object]]) -> str:
+    metrics = [
+        ("Write Throughput", "write_samples_per_sec", "higher is better", True, "samples/s"),
+        (
+            "Sequential Read",
+            "sequential_samples_per_sec",
+            "higher is better",
+            True,
+            "samples/s",
+        ),
+        ("Random Access", "random_access_p50_ms", "lower is better", False, "ms p50"),
+        ("Curation Query", "curation_query_ms", "lower is better", False, "ms"),
+        ("Disk Footprint", "disk_mb", "lower is better", False, "MB"),
+    ]
+    return "".join(
+        _build_metric_chart(storage_rows, title, key, subtitle, higher_is_better, unit)
+        for title, key, subtitle, higher_is_better, unit in metrics
+    )
+
+
+def _build_metric_chart(
+    storage_rows: list[dict[str, object]],
+    title: str,
+    key: str,
+    subtitle: str,
+    higher_is_better: bool,
+    unit: str,
+) -> str:
+    values = [
+        float(row[key])
+        for row in storage_rows
+        if isinstance(row.get(key), int | float) and float(row[key]) > 0
+    ]
+    if not values:
+        return (
+            "<section class='metric-chart'>"
+            f"<h3>{escape(title)}</h3>"
+            f"<p class='muted compact'>{escape(subtitle)}</p>"
+            "<div class='muted compact'>No data captured for this metric.</div>"
+            "</section>"
+        )
+
+    baseline = max(values) if higher_is_better else min(values)
+    rows: list[str] = []
+    for row in storage_rows:
+        value = row.get(key)
+        if not isinstance(value, int | float) or float(value) <= 0:
+            continue
+        numeric = float(value)
+        width = (
+            (numeric / baseline) * 100.0
+            if higher_is_better
+            else (baseline / numeric) * 100.0
+        )
+        rows.append(
+            "<div class='chart-row'>"
+            "<div class='chart-row-head'>"
+            f"<div><strong>{escape(str(row['backend']))}</strong>"
+            f"<span class='backend-meta'>{escape(_scope_label(row))}</span></div>"
+            f"<span>{escape(_format_metric_value(numeric, unit))}</span>"
+            "</div>"
+            "<div class='chart-track'>"
+            f"<div class='chart-bar' style='width:{max(8.0, min(width, 100.0)):.2f}%'></div>"
+            "</div>"
+            "</div>"
+        )
+    return (
+        "<section class='metric-chart'>"
+        f"<h3>{escape(title)}</h3>"
+        f"<p class='muted compact'>{escape(subtitle)}</p>"
+        f"<div class='chart-rows'>{''.join(rows)}</div>"
+        "</section>"
+    )
+
+
+def _build_storage_summary_table(storage_rows: list[dict[str, object]]) -> str:
+    rows = [
+        (
+            "<tr><th>Backend</th><th>Dataset Scope</th><th>Write samples/s</th>"
+            "<th>Sequential samples/s</th><th>Random access p50 ms</th>"
+            "<th>Disk MB</th><th>Curation ms</th><th>Status</th></tr>"
+        )
+    ]
+    for row in storage_rows:
+        rows.append(
+            "<tr>"
+            f"<td>{escape(str(row['backend']))}</td>"
+            f"<td>{escape(_scope_label(row))}</td>"
+            f"<td>{escape(_format_table_metric(row.get('write_samples_per_sec')))}</td>"
+            f"<td>{escape(_format_table_metric(row.get('sequential_samples_per_sec')))}</td>"
+            f"<td>{escape(_format_table_metric(row.get('random_access_p50_ms')))}</td>"
+            f"<td>{escape(_format_table_metric(row.get('disk_mb')))}</td>"
+            f"<td>{escape(_format_table_metric(row.get('curation_query_ms')))}</td>"
+            f"<td>{escape(str(row.get('status', 'unknown')))}</td>"
+            "</tr>"
+        )
+    return "".join(rows)
 
 
 def _format_metrics(metrics: dict[str, float]) -> str:
@@ -317,6 +533,104 @@ def _flatten_result(result: BenchmarkResult) -> dict[str, object]:
         **result.metrics,
         **{f"meta_{key}": value for key, value in result.metadata.items()},
     }
+
+
+def _storage_backends(report: BenchmarkReport) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for result in report.results:
+        if result.backend in {"Kafka", "real"}:
+            continue
+        if result.backend in seen:
+            continue
+        ordered.append(result.backend)
+        seen.add(result.backend)
+    return ordered
+
+
+def _match(report: BenchmarkReport, backend: str, pattern: str) -> BenchmarkResult | None:
+    for result in report.results:
+        if result.backend == backend and result.pattern == pattern:
+            return result
+    return None
+
+
+def _matches(report: BenchmarkReport, backend: str, pattern: str) -> list[BenchmarkResult]:
+    return [
+        result
+        for result in report.results
+        if result.backend == backend and result.pattern == pattern
+    ]
+
+
+def _metric(result: BenchmarkResult | None, *keys: str) -> float | None:
+    if result is None:
+        return None
+    for key in keys:
+        value = result.metrics.get(key)
+        if isinstance(value, int | float):
+            return float(value)
+    return None
+
+
+def _status(*results: BenchmarkResult | None) -> str:
+    statuses = [result.status for result in results if result is not None]
+    if not statuses:
+        return "missing"
+    if any(status != "ok" for status in statuses):
+        return "degraded"
+    return "ok"
+
+
+def _source_metadata(*results: BenchmarkResult | None) -> dict[str, object]:
+    for result in results:
+        if result is not None and result.metadata:
+            return result.metadata
+    return {}
+
+
+def _storage_write_metric(
+    write_result: BenchmarkResult | None,
+    batch_results: list[BenchmarkResult],
+) -> float | None:
+    metric = _metric(write_result, "throughput_samples_per_sec", "throughput")
+    if metric is not None:
+        return metric
+    if not batch_results:
+        return None
+    total_samples = sum(result.sample_count for result in batch_results)
+    total_elapsed = sum(result.elapsed_sec for result in batch_results if result.elapsed_sec)
+    if total_samples > 0 and total_elapsed > 0:
+        return total_samples / total_elapsed
+    throughputs = [
+        float(value)
+        for result in batch_results
+        if (value := result.metrics.get("throughput_samples_per_sec")) is not None
+    ]
+    if not throughputs:
+        return None
+    return sum(throughputs) / len(throughputs)
+
+
+def _scope_label(row: dict[str, object]) -> str:
+    samples = row.get("samples")
+    scenes = row.get("scenes")
+    pieces = []
+    if samples not in (None, ""):
+        pieces.append(f"{samples} samples")
+    if scenes not in (None, ""):
+        pieces.append(f"{scenes} scenes")
+    return " · ".join(pieces) if pieces else "scope unavailable"
+
+
+def _format_metric_value(value: float, unit: str) -> str:
+    return f"{value:,.2f} {unit}"
+
+
+def _format_table_metric(value: object) -> str:
+    if isinstance(value, int | float):
+        return f"{float(value):,.2f}"
+    return "n/a"
 
 
 def main(results_path: str | Path) -> int:

@@ -119,7 +119,6 @@ Inspect persisted telemetry history:
 ```bash
 make telemetry-runs
 make telemetry-dashboard
-make reports-index
 make serve-reports
 make data-explorer
 ```
@@ -131,9 +130,10 @@ make data-explorer
 make telemetry-dashboard RUN_ID=<run_id>
 ```
 
-`make reports-index` renders `artifacts/reports/index.html`, and `make serve-reports` serves
-`artifacts/reports/` over `http://127.0.0.1:8787/` by default so the generated HTML, JSON, and CSV
-artifacts can be viewed from a browser or fronted by a reverse proxy or tunnel.
+`make serve-reports` serves the browser app plus the generated report artifacts over
+`http://127.0.0.1:8787/` by default. The browser host also renders `/benchmark_dashboard.html`
+from the latest completed report for each backend, so large MinIO+PostgreSQL runs and newer
+single-backend benchmark runs stay visible without manually rewriting the root artifact bundle.
 
 The same browser entry point now also serves a searchable ingested-data explorer at `/explorer`.
 It reads sample metadata from PostgreSQL and proxies camera images from MinIO, so it requires the
@@ -150,9 +150,7 @@ From the running browser host you can then use:
 - `/explorer`
 - `/scene-studio`
 - `/benchmark_dashboard.html`
-- `/telemetry_dashboard.html`
-- `/grafana/`
-- `/prometheus/`
+- `/grafana-dashboard`
 
 `make data-explorer` starts a live browser app on `http://127.0.0.1:8788/` for the ingested
 records. It supports text search over token, scene, location, and annotation category;
@@ -160,14 +158,14 @@ dedicated scene/location/category filters; minimum-annotation filtering; summary
 previews sourced from MinIO when the camera blobs are available; on-demand processed camera
 comparisons; an inline LiDAR top-down preview rendered from the stored `.npy` payloads; a
 storage-format comparison panel that highlights Parquet, Redis, Lance, WebDataset, and
-MinIO+PostgreSQL metrics from the latest benchmark report; and a dedicated `/scene-studio`
-surface with scene scrubbing plus browser-side 3D LiDAR rendering from the stored `LIDAR_TOP`
-payloads.
+MinIO+PostgreSQL metrics from the latest completed run for each backend, with inline comparison
+graphs; and a dedicated `/scene-studio` surface with scene scrubbing plus browser-side 3D LiDAR
+rendering from the stored `LIDAR_TOP` payloads.
 
 `make deps` also starts Prometheus and Grafana:
 
-- Prometheus: `http://127.0.0.1:9090/prometheus/`
-- Grafana: `http://127.0.0.1:3000/grafana/`
+- Grafana dashboard: `http://127.0.0.1:3000/grafana/d/nudemo-observability/nudemo-observability`
+- Grafana root: `http://127.0.0.1:3000/grafana/`
 
 The report browser exports OpenTelemetry-backed Prometheus metrics from the latest persisted
 benchmark run on port `9464` by default, and Prometheus scrapes that endpoint so Grafana can show
