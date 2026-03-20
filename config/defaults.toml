@@ -43,6 +43,9 @@ db = 0
 [storage.lance]
 dataset_path = "artifacts/formats/lance/dataset.lance"
 
+[storage.parquet]
+dataset_path = "artifacts/formats/parquet/dataset"
+
 [storage.webdataset]
 shard_pattern = "artifacts/formats/webdataset/shard-%04d.tar"
 maxcount = 50

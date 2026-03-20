@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from nudemo.config import AppConfig
+from nudemo.explorer.media import lidar_payload_to_svg, process_camera_payload
 
 CAMERA_COLUMN_MAP = {
     "CAM_FRONT": "cam_front_path",
@@ -87,7 +88,7 @@ class ExplorerStore:
             summary["top_categories"] = list(cursor.fetchall())
         return summary
 
-    def fetch_filters(self) -> dict[str, list[str]]:
+    def fetch_filters(self) -> dict[str, Any]:
         with self._connection() as connection, connection.cursor() as cursor:
             cursor.execute("SELECT DISTINCT location FROM samples ORDER BY location")
             locations = [row["location"] for row in cursor.fetchall()]
@@ -95,12 +96,22 @@ class ExplorerStore:
             cursor.execute("SELECT DISTINCT category FROM annotations ORDER BY category")
             categories = [row["category"] for row in cursor.fetchall()]
 
-        return {"locations": locations, "categories": categories}
+            cursor.execute(
+                """
+                SELECT scene_token, scene_name, location, num_samples
+                FROM scenes
+                ORDER BY scene_name, location
+                """
+            )
+            scenes = [dict(row) for row in cursor.fetchall()]
+
+        return {"locations": locations, "categories": categories, "scenes": scenes}
 
     def search_samples(
         self,
         *,
         q: str | None,
+        scene_token: str | None,
         location: str | None,
         category: str | None,
         min_annotations: int,
@@ -112,6 +123,7 @@ class ExplorerStore:
         effective_offset = max(0, offset)
         effective_min_annotations = max(0, min_annotations)
         params = {
+            "scene_token": scene_token or None,
             "location": location or None,
             "category": category or None,
             "pattern": pattern,
@@ -140,7 +152,8 @@ class ExplorerStore:
                     FROM samples s
                     LEFT JOIN scenes sc ON sc.scene_token = s.scene_token
                     LEFT JOIN annotations a ON a.sample_idx = s.sample_idx
-                    WHERE (%(location)s::text IS NULL OR s.location = %(location)s::text)
+                    WHERE (%(scene_token)s::text IS NULL OR s.scene_token = %(scene_token)s::text)
+                      AND (%(location)s::text IS NULL OR s.location = %(location)s::text)
                       AND (
                         %(min_annotations)s = 0
                         OR s.num_annotations >= %(min_annotations)s
@@ -278,6 +291,71 @@ class ExplorerStore:
             sensor: detail.get(column_name) for sensor, column_name in SENSOR_COLUMN_MAP.items()
         }
         return detail
+
+    def fetch_scene_samples(self, scene_token: str, *, limit: int = 18) -> list[dict[str, Any]]:
+        with self._connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    s.sample_idx,
+                    s.token,
+                    s.scene_token,
+                    COALESCE(sc.scene_name, s.scene_token) AS scene_name,
+                    s.location,
+                    s.timestamp,
+                    s.num_annotations,
+                    s.num_lidar_points,
+                    s.cam_front_path
+                FROM samples s
+                LEFT JOIN scenes sc ON sc.scene_token = s.scene_token
+                WHERE s.scene_token = %s
+                ORDER BY s.timestamp, s.sample_idx
+                LIMIT %s
+                """,
+                (scene_token, max(1, min(limit, 36))),
+            )
+            rows = [dict(row) for row in cursor.fetchall()]
+        return [
+            {
+                "sample_idx": row["sample_idx"],
+                "token": row["token"],
+                "scene_token": row["scene_token"],
+                "scene_name": row["scene_name"],
+                "location": row["location"],
+                "timestamp": row["timestamp"],
+                "num_annotations": row["num_annotations"],
+                "num_lidar_points": row["num_lidar_points"],
+                "preview_url": (
+                    f"/api/samples/{row['sample_idx']}/cameras/CAM_FRONT"
+                    if row.get("cam_front_path")
+                    else None
+                ),
+            }
+            for row in rows
+        ]
+
+    def fetch_sensor_bytes(self, sample_idx: int, sensor: str) -> bytes:
+        column_name = SENSOR_COLUMN_MAP.get(sensor)
+        if column_name is None:
+            raise KeyError(sensor)
+
+        with self._connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT {column_name} AS object_path FROM samples WHERE sample_idx = %s",
+                (sample_idx,),
+            )
+            row = cursor.fetchone()
+            if row is None or row["object_path"] is None:
+                raise FileNotFoundError(sensor)
+            object_path = row["object_path"]
+
+        client = self._minio()
+        response = client.get_object(self._config.services.minio.bucket, object_path)
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
 
     def fetch_camera_bytes(self, sample_idx: int, camera: str) -> bytes:
         column_name = CAMERA_COLUMN_MAP.get(camera)
@@ -777,6 +855,50 @@ def build_explorer_html() -> str:
         overflow-wrap: anywhere;
         word-break: break-word;
       }
+      .camera-compare {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }
+      .scene-strip {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 10px;
+        margin-top: 14px;
+      }
+      .scene-sample {
+        border: 3px solid var(--line);
+        border-radius: 16px;
+        overflow: hidden;
+        background: var(--panel);
+        box-shadow: 4px 4px 0 #211b52;
+        cursor: pointer;
+      }
+      .scene-sample img {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        display: block;
+        object-fit: cover;
+        background: #2a2938;
+      }
+      .scene-sample .body {
+        padding: 10px 12px 12px;
+        font-size: 0.82rem;
+      }
+      .lidar-card {
+        margin-top: 14px;
+        border: 3px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+        background: #111119;
+        box-shadow: 4px 4px 0 #211b52;
+      }
+      .lidar-card img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
       .annotation-table {
         width: 100%;
         border-collapse: collapse;
@@ -832,6 +954,7 @@ def build_explorer_html() -> str:
         .shell { grid-template-columns: 1fr; }
         .sidebar { position: static; }
         .camera-grid { grid-template-columns: 1fr; }
+        .camera-compare { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -851,6 +974,10 @@ def build_explorer_html() -> str:
           <div class="field">
             <label for="q">Search</label>
             <input id="q" type="search" placeholder="token, scene, location, or category">
+          </div>
+          <div class="field">
+            <label for="scene">Scene</label>
+            <select id="scene"><option value="">All scenes</option></select>
           </div>
           <div class="field">
             <label for="location">Location</label>
@@ -905,7 +1032,7 @@ def build_explorer_html() -> str:
           <div class="detail-placeholder">
             <div>
               <h2>Select a sample</h2>
-              <p>The detail view shows all camera streams, annotation rows, and stored sensor paths.</p>
+              <p>The detail view shows scene context, camera and processed previews, a LiDAR top-down render, and stored sensor paths.</p>
             </div>
           </div>
         </aside>
@@ -915,6 +1042,7 @@ def build_explorer_html() -> str:
     <script>
       const state = {
         q: "",
+        scene: "",
         location: "",
         category: "",
         minAnnotations: 0,
@@ -926,6 +1054,7 @@ def build_explorer_html() -> str:
       const el = {
         notice: document.getElementById("notice"),
         q: document.getElementById("q"),
+        scene: document.getElementById("scene"),
         location: document.getElementById("location"),
         category: document.getElementById("category"),
         minAnnotations: document.getElementById("min_annotations"),
@@ -951,6 +1080,7 @@ def build_explorer_html() -> str:
       function paramsFromState() {
         const params = new URLSearchParams();
         if (state.q) params.set("q", state.q);
+        if (state.scene) params.set("scene_token", state.scene);
         if (state.location) params.set("location", state.location);
         if (state.category) params.set("category", state.category);
         if (state.minAnnotations > 0) params.set("min_annotations", String(state.minAnnotations));
@@ -991,6 +1121,9 @@ def build_explorer_html() -> str:
       }
 
       function renderFilterOptions(filters) {
+        el.scene.innerHTML = `<option value="">All scenes</option>` + (filters.scenes || [])
+          .map((scene) => `<option value="${scene.scene_token}">${scene.scene_name} · ${scene.location} · ${Number(scene.num_samples || 0).toLocaleString()} samples</option>`)
+          .join("");
         el.location.innerHTML = `<option value="">All locations</option>` + filters.locations
           .map((value) => `<option value="${value}">${value}</option>`)
           .join("");
@@ -1069,10 +1202,33 @@ def build_explorer_html() -> str:
             <span class="chip">${sample.num_annotations} annotations</span>
             <span class="chip">${sample.num_lidar_points} LiDAR points</span>
             <span class="chip">token ${sample.token.slice(0, 12)}</span>
+            <span class="chip">scene ${sample.scene_token.slice(0, 12)}</span>
           </div>
+
+          <h3 style="margin-top:18px;">Scene strip</h3>
+          <div class="scene-strip" id="scene_strip"><p>Loading scene samples...</p></div>
 
           <h3 style="margin-top:18px;">Camera previews</h3>
           <div class="camera-grid">${cameraFrames || "<p>No camera blobs available.</p>"}</div>
+
+          <h3 style="margin-top:18px;">Processed camera comparison</h3>
+          <div class="camera-compare">
+            <div class="camera-frame">
+              <img loading="lazy" src="${sample.camera_urls?.CAM_FRONT || ""}" alt="CAM_FRONT original">
+              <strong>CAM_FRONT original</strong>
+              <span>${(sample.camera_paths || {}).CAM_FRONT || "missing"}</span>
+            </div>
+            <div class="camera-frame">
+              <img loading="lazy" src="/api/samples/${sample.sample_idx}/cameras/CAM_FRONT/processed?mode=edges" alt="CAM_FRONT processed">
+              <strong>CAM_FRONT processed</strong>
+              <span>Edge-enhanced preview derived on demand from the stored JPEG.</span>
+            </div>
+          </div>
+
+          <h3 style="margin-top:18px;">LiDAR top-down view</h3>
+          <div class="lidar-card">
+            <img loading="lazy" src="/api/samples/${sample.sample_idx}/lidar/preview.svg" alt="LiDAR preview for sample ${sample.sample_idx}">
+          </div>
 
           <h3 style="margin-top:18px;">Sensor object paths</h3>
           <ul class="list path-list">${sensorRows}</ul>
@@ -1087,6 +1243,27 @@ def build_explorer_html() -> str:
             </tbody>
           </table>
         `;
+      }
+
+      function renderSceneSamples(samples) {
+        const target = document.getElementById("scene_strip");
+        if (!target) return;
+        if (!samples.length) {
+          target.innerHTML = "<p>No neighboring scene samples were found.</p>";
+          return;
+        }
+        target.innerHTML = samples.map((sample) => `
+          <article class="scene-sample" data-scene-sample="${sample.sample_idx}">
+            ${sample.preview_url ? `<img loading="lazy" src="${sample.preview_url}" alt="Scene sample ${sample.sample_idx}">` : `<div style="aspect-ratio:16/9;background:#2a2938;"></div>`}
+            <div class="body">
+              <strong style="display:block;color:var(--ink);margin-bottom:6px;">#${sample.sample_idx}</strong>
+              <span>${sample.num_annotations} ann · ${sample.num_lidar_points} pts</span>
+            </div>
+          </article>
+        `).join("");
+        target.querySelectorAll("[data-scene-sample]").forEach((node) => {
+          node.addEventListener("click", () => loadDetail(node.dataset.sceneSample));
+        });
       }
 
       async function loadSummary() {
@@ -1107,10 +1284,13 @@ def build_explorer_html() -> str:
       async function loadDetail(sampleIdx) {
         const sample = await requestJson(`/api/samples/${sampleIdx}`);
         renderDetail(sample);
+        const scenePayload = await requestJson(`/api/scenes/${encodeURIComponent(sample.scene_token)}/samples`);
+        renderSceneSamples(scenePayload.items || []);
       }
 
       function syncStateFromInputs() {
         state.q = el.q.value.trim();
+        state.scene = el.scene.value;
         state.location = el.location.value;
         state.category = el.category.value;
         state.minAnnotations = Number(el.minAnnotations.value || 0);
@@ -1131,6 +1311,7 @@ def build_explorer_html() -> str:
       el.apply.addEventListener("click", () => refresh(true));
       el.reset.addEventListener("click", async () => {
         el.q.value = "";
+        el.scene.value = "";
         el.location.value = "";
         el.category.value = "";
         el.minAnnotations.value = "0";
@@ -1210,7 +1391,7 @@ def create_app(
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/api/filters")
-    def api_filters() -> dict[str, list[str]]:
+    def api_filters() -> dict[str, Any]:
         try:
             return store.fetch_filters()
         except Exception as exc:  # pragma: no cover - depends on external services
@@ -1219,6 +1400,7 @@ def create_app(
     @app.get("/api/samples")
     def api_samples(
         q: str | None = None,
+        scene_token: str | None = None,
         location: str | None = None,
         category: str | None = None,
         min_annotations: int = Query(default=0, ge=0),
@@ -1228,6 +1410,7 @@ def create_app(
         try:
             return store.search_samples(
                 q=q,
+                scene_token=scene_token,
                 location=location,
                 category=category,
                 min_annotations=min_annotations,
@@ -1265,6 +1448,67 @@ def create_app(
         except Exception as exc:  # pragma: no cover - depends on external services
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return Response(content=payload, media_type="image/jpeg")
+
+    @app.get("/api/samples/{sample_idx}/cameras/{camera}/processed")
+    def api_sample_camera_processed(sample_idx: int, camera: str, mode: str = "edges") -> Response:
+        normalized_camera = camera.upper()
+        try:
+            payload = store.fetch_camera_bytes(sample_idx, normalized_camera)
+            processed = process_camera_payload(payload, mode=mode)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"camera {escape(camera)} is not available",
+            ) from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"camera {normalized_camera} for sample {sample_idx} was not found",
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return Response(content=processed, media_type="image/jpeg")
+
+    @app.get("/api/samples/{sample_idx}/lidar/preview.svg")
+    def api_sample_lidar_preview(
+        sample_idx: int,
+        width: int = Query(default=720, ge=240, le=1400),
+        height: int = Query(default=420, ge=180, le=900),
+        max_points: int = Query(default=2500, ge=200, le=12000),
+    ) -> Response:
+        try:
+            payload = store.fetch_sensor_bytes(sample_idx, "LIDAR_TOP")
+            svg = lidar_payload_to_svg(
+                payload,
+                width=width,
+                height=height,
+                max_points=max_points,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="LiDAR sensor is not available") from exc
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"LiDAR payload for sample {sample_idx} was not found",
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return Response(content=svg, media_type="image/svg+xml")
+
+    @app.get("/api/scenes/{scene_token}/samples")
+    def api_scene_samples(
+        scene_token: str,
+        limit: int = Query(default=18, ge=1, le=36),
+    ) -> dict[str, Any]:
+        try:
+            items = store.fetch_scene_samples(scene_token, limit=limit)
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {"scene_token": scene_token, "items": items}
 
     app.mount("/", StaticFiles(directory=config.runtime.reports_root), name="reports")
     return app

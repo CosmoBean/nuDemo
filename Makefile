@@ -58,7 +58,7 @@ endif
 
 .PHONY: help bootstrap bootstrap-legacy check-env deps doctor cli extract extract-synthetic \
 	kafka kafka-topics kafka-metadata kafka-full storage storage-minio-postgres storage-redis \
-	storage-lance storage-webdataset benchmark-sim benchmark-real dashboard render-sample \
+	storage-lance storage-parquet storage-webdataset benchmark-sim benchmark-real dashboard render-sample \
 	render-scene download-trainval download-trainval-full telemetry-runs \
 	telemetry-dashboard reports-index serve-reports data-explorer lint test clean infra-up \
 	infra-down infra-ps infra-logs
@@ -101,7 +101,7 @@ kafka-metadata: ## Produce metadata-only Kafka messages
 kafka-full: ## Produce full-payload Kafka benchmark messages
 	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) --mode full-payload $(EXTRA_ARGS)
 
-storage: ## Write samples to one backend via BACKEND=minio-postgres|redis|lance|webdataset
+storage: ## Write samples to one backend via BACKEND=minio-postgres|redis|lance|parquet|webdataset
 	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) storage $(BACKEND) --provider $(PROVIDER) $(LIMIT_ARGS) $(EXTRA_ARGS)
 
 storage-minio-postgres: ## Write samples to MinIO + PostgreSQL
@@ -112,6 +112,9 @@ storage-redis: ## Write samples to Redis
 
 storage-lance: ## Write samples to Lance
 	@$(MAKE) storage BACKEND=lance PROVIDER=$(PROVIDER) LIMIT="$(LIMIT)" EXTRA_ARGS="$(EXTRA_ARGS)"
+
+storage-parquet: ## Write samples to Parquet
+	@$(MAKE) storage BACKEND=parquet PROVIDER=$(PROVIDER) LIMIT="$(LIMIT)" EXTRA_ARGS="$(EXTRA_ARGS)"
 
 storage-webdataset: ## Write samples to WebDataset
 	@$(MAKE) storage BACKEND=webdataset PROVIDER=$(PROVIDER) LIMIT="$(LIMIT)" EXTRA_ARGS="$(EXTRA_ARGS)"

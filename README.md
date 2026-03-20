@@ -2,7 +2,7 @@
 
 `nuDemo` is a local execution scaffold for a nuScenes data engineering and benchmarking pipeline:
 
-- Real-path code for nuScenes extraction, Kafka ingestion, and MinIO/PostgreSQL, Redis, Lance, and WebDataset storage backends.
+- Real-path code for nuScenes extraction, Kafka ingestion, and MinIO/PostgreSQL, Redis, Lance, Parquet, and WebDataset storage backends.
 - A synthetic benchmark suite that runs without Docker or the real dataset and produces report artifacts immediately.
 - Reporting hooks that export JSON/CSV-style benchmark data and render a lightweight dashboard HTML summary.
 - Persisted telemetry for benchmark runs, including stage spans and Docker service snapshots stored in PostgreSQL when the Docker-backed stack is available.
@@ -57,7 +57,7 @@ Run the live benchmark suite against the Docker-backed services:
 
 ```bash
 make deps
-make benchmark-real DATASET_VERSION=v1.0-trainval PROVIDER=real LIMIT=16 BACKENDS="minio-postgres redis lance webdataset"
+make benchmark-real DATASET_VERSION=v1.0-trainval PROVIDER=real LIMIT=16 BACKENDS="minio-postgres redis lance parquet webdataset"
 ```
 
 `benchmark-real` reloads the selected backends with exactly the requested `LIMIT`, then benchmarks
@@ -111,8 +111,9 @@ From the running browser host you can then use:
 
 `make data-explorer` starts a live browser app on `http://127.0.0.1:8788/` for the ingested
 records. It supports text search over token, scene, location, and annotation category;
-location/category filters; minimum-annotation filtering; summary cards; and `CAM_*` previews
-sourced from MinIO when the camera blobs are available.
+dedicated scene/location/category filters; minimum-annotation filtering; summary cards; `CAM_*`
+previews sourced from MinIO when the camera blobs are available; on-demand processed camera
+comparisons; and an inline LiDAR top-down preview rendered from the stored `.npy` payloads.
 
 ## Visual Inspection
 
@@ -135,7 +136,7 @@ The real integration points are implemented under `src/nudemo/`:
 
 - `extraction/` loads either nuScenes data or a deterministic synthetic fallback.
 - `ingestion/` encodes metadata-only and full-payload Kafka messages and exposes topic/bootstrap helpers.
-- `storage/` contains live backends for MinIO+PostgreSQL, Redis, Lance, and WebDataset.
+- `storage/` contains live backends for MinIO+PostgreSQL, Redis, Lance, Parquet, and WebDataset.
 - `benchmarks/` contains an in-memory orchestration layer for fast local validation and CI.
 - `rendering.py` exports sample contact sheets and scene GIFs into browser-visible artifacts.
 - `telemetry/` persists run history, stage spans, and service snapshots into PostgreSQL and renders a bottleneck dashboard.

@@ -87,6 +87,11 @@ class LanceSettings:
 
 
 @dataclass(slots=True)
+class ParquetSettings:
+    dataset_path: Path
+
+
+@dataclass(slots=True)
 class WebDatasetSettings:
     shard_pattern: str
     maxcount: int
@@ -103,6 +108,7 @@ class ServiceSettings:
 @dataclass(slots=True)
 class StorageSettings:
     lance: LanceSettings
+    parquet: ParquetSettings
     webdataset: WebDatasetSettings
 
 
@@ -168,6 +174,9 @@ class AppConfig:
         storage = StorageSettings(
             lance=LanceSettings(
                 dataset_path=_resolve_path(base_dir, storage_raw["lance"]["dataset_path"])
+            ),
+            parquet=ParquetSettings(
+                dataset_path=_resolve_path(base_dir, storage_raw["parquet"]["dataset_path"])
             ),
             webdataset=WebDatasetSettings(**storage_raw["webdataset"]),
         )

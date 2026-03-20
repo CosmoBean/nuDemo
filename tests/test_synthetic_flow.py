@@ -12,6 +12,7 @@ if str(SRC) not in sys.path:
 from nudemo.benchmarks.backends import (
     LanceBackend,
     MinioPostgresBackend,
+    ParquetBackend,
     RedisBackend,
     WebDatasetBackend,
 )
@@ -33,19 +34,23 @@ class SyntheticFlowTests(unittest.TestCase):
 
         minio = MinioPostgresBackend()
         lance = LanceBackend()
+        parquet = ParquetBackend()
         redis = RedisBackend()
         webdataset = WebDatasetBackend()
 
-        for backend in (minio, lance, redis, webdataset):
+        for backend in (minio, lance, parquet, redis, webdataset):
             backend.load(dataset)
 
         curation_filter = SyntheticNuScenesDataset(sample_count=24, scene_count=4).curation_filter()
         minio_matches = minio.query_indices(curation_filter)
         lance_matches = lance.query_indices(curation_filter)
+        parquet_matches = parquet.query_indices(curation_filter)
 
         self.assertEqual(minio_matches, lance_matches)
+        self.assertEqual(minio_matches, parquet_matches)
         self.assertTrue(minio_matches)
         self.assertGreater(minio.fetch_sample(minio_matches[0]).payload_bytes(), 0)
+        self.assertGreater(parquet.fetch_sample(parquet_matches[0]).payload_bytes(), 0)
         self.assertGreater(redis.fetch_sample(0, payload=False).manifest_bytes(), 0)
 
         with self.assertRaises(NotImplementedError):

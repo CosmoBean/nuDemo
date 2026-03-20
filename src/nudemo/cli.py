@@ -14,6 +14,9 @@ from nudemo.benchmarks.backends import (
     MinioPostgresBackend as SimulatedMinioPostgresBackend,
 )
 from nudemo.benchmarks.backends import (
+    ParquetBackend as SimulatedParquetBackend,
+)
+from nudemo.benchmarks.backends import (
     RedisBackend as SimulatedRedisBackend,
 )
 from nudemo.benchmarks.backends import (
@@ -38,6 +41,7 @@ from nudemo.reporting.dashboard import build_dashboard_html
 from nudemo.reporting.dashboard import main as dashboard_main
 from nudemo.storage.lance_store import LanceBackend
 from nudemo.storage.minio_postgres import MinioPostgresBackend
+from nudemo.storage.parquet_store import ParquetBackend
 from nudemo.storage.redis_store import RedisBackend
 from nudemo.storage.webdataset_store import WebDatasetBackend
 from nudemo.telemetry.dashboard import build_telemetry_dashboard_html
@@ -62,6 +66,7 @@ def make_backends(config: AppConfig) -> dict[str, object]:
         ),
         "redis": RedisBackend(config.services.redis),
         "lance": LanceBackend(config.storage.lance.dataset_path),
+        "parquet": ParquetBackend(config.storage.parquet.dataset_path),
         "webdataset": WebDatasetBackend(
             shard_pattern=config.storage.webdataset.shard_pattern,
             maxcount=config.storage.webdataset.maxcount,
@@ -74,6 +79,7 @@ def make_simulated_backends() -> dict[str, object]:
         "minio-postgres": SimulatedMinioPostgresBackend(),
         "redis": SimulatedRedisBackend(),
         "lance": SimulatedLanceBackend(),
+        "parquet": SimulatedParquetBackend(),
         "webdataset": SimulatedWebDatasetBackend(),
     }
 
@@ -194,7 +200,7 @@ def _run_live_benchmark(
     args: argparse.Namespace,
     recorder: TelemetryRecorder | None = None,
 ) -> tuple[dict[str, int | float | str], list[BenchmarkResult]]:
-    selected_names = args.backends or ["minio-postgres", "redis", "lance", "webdataset"]
+    selected_names = args.backends or ["minio-postgres", "redis", "lance", "parquet", "webdataset"]
     dataset_result, dataset_summary = _benchmark_extraction(config, args.provider, args.limit)
     results: list[BenchmarkResult] = [dataset_result]
     if recorder is not None:
@@ -404,7 +410,7 @@ def command_storage(args: argparse.Namespace) -> int:
 
 def command_benchmark(args: argparse.Namespace) -> int:
     config = AppConfig.load(args.config)
-    selected_names = args.backends or ["minio-postgres", "redis", "lance", "webdataset"]
+    selected_names = args.backends or ["minio-postgres", "redis", "lance", "parquet", "webdataset"]
     run_id = uuid4().hex[:12]
     recorder = TelemetryRecorder.start(
         settings=config.services.postgres,
@@ -601,7 +607,10 @@ def build_parser() -> argparse.ArgumentParser:
     kafka.set_defaults(func=command_kafka)
 
     storage = subparsers.add_parser("storage")
-    storage.add_argument("backend", choices=["minio-postgres", "redis", "lance", "webdataset"])
+    storage.add_argument(
+        "backend",
+        choices=["minio-postgres", "redis", "lance", "parquet", "webdataset"],
+    )
     storage.add_argument("--provider", default="real", choices=["auto", "real", "synthetic"])
     storage.add_argument("--limit", type=int, default=None)
     storage.set_defaults(func=command_storage)
@@ -620,7 +629,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--backends",
         nargs="*",
-        choices=["minio-postgres", "redis", "lance", "webdataset"],
+        choices=["minio-postgres", "redis", "lance", "parquet", "webdataset"],
         default=None,
     )
     run.add_argument("--num-runs", type=int, default=1)

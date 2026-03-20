@@ -13,6 +13,7 @@ if str(SRC) not in sys.path:
 from nudemo.benchmarks.backends import (
     LanceBackend,
     MinioPostgresBackend,
+    ParquetBackend,
     RedisBackend,
     WebDatasetBackend,
 )
@@ -29,7 +30,13 @@ from nudemo.reporting.dashboard import (
 class ExportReportingTests(unittest.TestCase):
     def test_export_roundtrip_and_dashboard_render(self) -> None:
         dataset = SyntheticNuScenesDataset(sample_count=24, scene_count=4).build()
-        backends = [MinioPostgresBackend(), LanceBackend(), RedisBackend(), WebDatasetBackend()]
+        backends = [
+            MinioPostgresBackend(),
+            LanceBackend(),
+            ParquetBackend(),
+            RedisBackend(),
+            WebDatasetBackend(),
+        ]
         report = BenchmarkOrchestrator(
             dataset,
             backends,
@@ -47,6 +54,7 @@ class ExportReportingTests(unittest.TestCase):
         self.assertIn("Throughput vs. num_workers", html)
         self.assertIn("WebDataset", html)
         self.assertIn("Lance", html)
+        self.assertIn("Parquet", html)
 
         recommendations = build_recommendation_summary(loaded)
         self.assertIn("training", recommendations)

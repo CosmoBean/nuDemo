@@ -104,6 +104,22 @@ class LanceBackend(BaseBackend):
         )
 
 
+class ParquetBackend(BaseBackend):
+    def __init__(self) -> None:
+        super().__init__(
+            name="Parquet",
+            profile=BackendProfile(
+                sequential_samples_per_sec=228.0,
+                random_access_ms=5.4,
+                query_ms=6.1,
+                e2e_ms=8.6,
+                write_samples_per_sec=205.0,
+                dataloader_base=236.0,
+                disk_multiplier=0.93,
+            ),
+        )
+
+
 class RedisBackend(BaseBackend):
     def __init__(self) -> None:
         super().__init__(
