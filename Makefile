@@ -4,6 +4,9 @@ UV ?= uv
 PYTHON ?= 3.12
 CONFIG ?=
 PROVIDER ?= real
+DATASET_VERSION ?=
+DATASET_ROOT ?=
+RAW_ROOT ?= $(CURDIR)/data/raw/v1.0-trainval
 LIMIT ?=
 BACKEND ?= lance
 MODE ?= metadata-only
@@ -28,7 +31,12 @@ FRAME_STEP ?= 1
 FPS ?= 2
 OUTPUT ?=
 EXTRA_ARGS ?=
+NUSCENES_PROFILE ?= keyframes
+DOWNLOAD_MODE ?= all
+KEEP_ARCHIVES ?= 1
 DOCKER_COMPOSE ?= docker compose -f config/docker-compose.yml
+
+RUN_ENV_VARS := $(strip $(if $(DATASET_VERSION),NUDEMO_DATASET_VERSION=$(DATASET_VERSION)) $(if $(DATASET_ROOT),NUDEMO_DATASET_ROOT=$(DATASET_ROOT)))
 
 ifdef CONFIG
 CONFIG_ARGS := --config $(CONFIG)
@@ -51,7 +59,7 @@ endif
 .PHONY: help bootstrap bootstrap-legacy check-env deps doctor cli extract extract-synthetic \
 	kafka kafka-topics kafka-metadata kafka-full storage storage-minio-postgres storage-redis \
 	storage-lance storage-webdataset benchmark-sim benchmark-real dashboard render-sample \
-	render-scene telemetry-runs \
+	render-scene download-trainval download-trainval-full telemetry-runs \
 	telemetry-dashboard reports-index serve-reports data-explorer lint test clean infra-up \
 	infra-down infra-ps infra-logs
 
@@ -70,31 +78,31 @@ check-env: ## Validate local tooling and project config
 deps: infra-up ## Start all compose-backed project dependencies
 
 doctor: ## Inspect runtime, dataset visibility, and dataset counts
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) doctor
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) doctor
 
 cli: ## Run an arbitrary nudemo CLI command via ARGS="..."
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) $(ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) $(ARGS)
 
 extract: ## Extract sample metadata from the configured provider
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) extract --provider $(PROVIDER) $(LIMIT_ARGS) $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) extract --provider $(PROVIDER) $(LIMIT_ARGS) $(EXTRA_ARGS)
 
 extract-synthetic: ## Extract one synthetic sample for smoke testing
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) extract --provider synthetic $(LIMIT_ARGS) $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) extract --provider synthetic $(LIMIT_ARGS) $(EXTRA_ARGS)
 
 kafka: ## Produce Kafka messages with MODE=metadata-only|full-payload
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) --mode $(MODE) $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) --mode $(MODE) $(EXTRA_ARGS)
 
 kafka-topics: ## Create Kafka topics for the live pipeline
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) --create-topics $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) --create-topics $(EXTRA_ARGS)
 
 kafka-metadata: ## Produce metadata-only Kafka messages
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) --mode metadata-only $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) --mode metadata-only $(EXTRA_ARGS)
 
 kafka-full: ## Produce full-payload Kafka benchmark messages
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) --mode full-payload $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) --mode full-payload $(EXTRA_ARGS)
 
 storage: ## Write samples to one backend via BACKEND=minio-postgres|redis|lance|webdataset
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) storage $(BACKEND) --provider $(PROVIDER) $(LIMIT_ARGS) $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) storage $(BACKEND) --provider $(PROVIDER) $(LIMIT_ARGS) $(EXTRA_ARGS)
 
 storage-minio-postgres: ## Write samples to MinIO + PostgreSQL
 	@$(MAKE) storage BACKEND=minio-postgres PROVIDER=$(PROVIDER) LIMIT="$(LIMIT)" EXTRA_ARGS="$(EXTRA_ARGS)"
@@ -109,25 +117,33 @@ storage-webdataset: ## Write samples to WebDataset
 	@$(MAKE) storage BACKEND=webdataset PROVIDER=$(PROVIDER) LIMIT="$(LIMIT)" EXTRA_ARGS="$(EXTRA_ARGS)"
 
 benchmark-sim: ## Run the in-memory synthetic benchmark suite
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark run --simulate --provider synthetic $(LIMIT_ARGS) $(BACKENDS_ARGS) --num-runs $(NUM_RUNS) --random-sample-count $(RANDOM_SAMPLE_COUNT) --batch-size $(BATCH_SIZE) --num-workers $(NUM_WORKERS) $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark run --simulate --provider synthetic $(LIMIT_ARGS) $(BACKENDS_ARGS) --num-runs $(NUM_RUNS) --random-sample-count $(RANDOM_SAMPLE_COUNT) --batch-size $(BATCH_SIZE) --num-workers $(NUM_WORKERS) $(EXTRA_ARGS)
 
 benchmark-real: ## Run live backend benchmarks against the configured provider
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark run --provider $(PROVIDER) $(LIMIT_ARGS) $(BACKENDS_ARGS) --num-runs $(NUM_RUNS) --random-sample-count $(RANDOM_SAMPLE_COUNT) --batch-size $(BATCH_SIZE) --num-workers $(NUM_WORKERS) $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark run --provider $(PROVIDER) $(LIMIT_ARGS) $(BACKENDS_ARGS) --num-runs $(NUM_RUNS) --random-sample-count $(RANDOM_SAMPLE_COUNT) --batch-size $(BATCH_SIZE) --num-workers $(NUM_WORKERS) $(EXTRA_ARGS)
 
 dashboard: ## Render the benchmark dashboard from RESULTS=...
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark dashboard --results-path $(RESULTS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark dashboard --results-path $(RESULTS)
 
 render-sample: ## Render a sample contact sheet to artifacts/reports/renders; use SAMPLE_IDX=<n>
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) render sample --provider $(PROVIDER) --sample-idx $(SAMPLE_IDX) $(if $(OUTPUT),--output $(OUTPUT),) $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) render sample --provider $(PROVIDER) --sample-idx $(SAMPLE_IDX) $(if $(OUTPUT),--output $(OUTPUT),) $(EXTRA_ARGS)
 
 render-scene: ## Render a scene GIF to artifacts/reports/renders; optional SCENE_NAME=... CAMERA=... MAX_FRAMES=... FRAME_STEP=... FPS=...
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) render scene $(if $(SCENE_NAME),--scene-name $(SCENE_NAME),) --camera $(CAMERA) --max-frames $(MAX_FRAMES) --step $(FRAME_STEP) --fps $(FPS) $(if $(OUTPUT),--output $(OUTPUT),) $(EXTRA_ARGS)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) render scene $(if $(SCENE_NAME),--scene-name $(SCENE_NAME),) --camera $(CAMERA) --max-frames $(MAX_FRAMES) --step $(FRAME_STEP) --fps $(FPS) $(if $(OUTPUT),--output $(OUTPUT),) $(EXTRA_ARGS)
+
+download-trainval: ## Download/extract official nuScenes v1.0-trainval keyframes from AWS Open Data
+	@NUSCENES_PROFILE="$(NUSCENES_PROFILE)" NUSCENES_MODE="$(DOWNLOAD_MODE)" NUSCENES_KEEP_ARCHIVES="$(KEEP_ARCHIVES)" \
+		NUSCENES_RAW_ROOT="$(RAW_ROOT)" NUSCENES_DATASET_ROOT="$(if $(DATASET_ROOT),$(DATASET_ROOT),$(CURDIR)/data/nuscenes)" \
+		bash ./scripts/download_nuscenes_trainval.sh
+
+download-trainval-full: ## Download/extract trainval keyframes plus sweep blobs; requires substantially more disk
+	@$(MAKE) download-trainval NUSCENES_PROFILE=full DOWNLOAD_MODE="$(DOWNLOAD_MODE)" KEEP_ARCHIVES="$(KEEP_ARCHIVES)" RAW_ROOT="$(RAW_ROOT)" DATASET_ROOT="$(DATASET_ROOT)"
 
 telemetry-runs: ## Show recent telemetry runs stored in PostgreSQL
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) telemetry runs --limit $(or $(LIMIT),10)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) telemetry runs --limit $(or $(LIMIT),10)
 
 telemetry-dashboard: ## Render telemetry dashboard from PostgreSQL; optional RUN_ID=<id>
-	@$(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) telemetry dashboard $(if $(RUN_ID),--run-id $(RUN_ID),--latest)
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) telemetry dashboard $(if $(RUN_ID),--run-id $(RUN_ID),--latest)
 
 reports-index: ## Render artifacts/reports/index.html for browser-friendly navigation
 	@python3 ./scripts/render_reports_index.py "$(REPORTS_ROOT)"

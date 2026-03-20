@@ -21,8 +21,23 @@ Check the runtime and dataset visibility:
 .venv/bin/nudemo doctor
 ```
 
-For real-data runs, place the official `nuScenes v1.0-mini` dataset under `data/nuscenes` so that
-`data/nuscenes/v1.0-mini` exists, or set `NUDEMO_DATASET_ROOT` to a different extracted dataset root.
+For real-data runs, place an extracted nuScenes dataset under `data/nuscenes` so that
+`data/nuscenes/<dataset-version>` exists, or set `NUDEMO_DATASET_ROOT` to a different extracted dataset root.
+The repo still defaults to `v1.0-mini`, but you can target full trainval with
+`DATASET_VERSION=v1.0-trainval`.
+
+To pull the official full trainval keyframe release from the Motional nuScenes AWS Open Data mirror:
+
+```bash
+make download-trainval
+```
+
+This downloads and extracts `v1.0-trainval_meta.tgz`, the ten `v1.0-trainval##_keyframes.tgz`
+archives, and `nuScenes-map-expansion-v1.3.zip` into `data/nuscenes`, while maintaining resumable
+checkpoints under `artifacts/checkpoints/nuscenes-trainval/`. The default profile is the full
+trainval keyframe sample set, which is about `42.6 GiB` compressed and matches the current
+pipeline's sample-level extraction path. If you later want the much larger sweep/blob archives,
+run `make download-trainval-full`.
 
 Run the service-free synthetic benchmark suite:
 
@@ -42,7 +57,7 @@ Run the live benchmark suite against the Docker-backed services:
 
 ```bash
 make deps
-make benchmark-real PROVIDER=real LIMIT=16 BACKENDS="minio-postgres redis lance webdataset"
+make benchmark-real DATASET_VERSION=v1.0-trainval PROVIDER=real LIMIT=16 BACKENDS="minio-postgres redis lance webdataset"
 ```
 
 `benchmark-real` reloads the selected backends with exactly the requested `LIMIT`, then benchmarks
@@ -105,8 +120,8 @@ nuScenes is scene-based. A scene is a temporal driving sequence, while each samp
 synchronized sensor snapshot across the six cameras, LiDAR, and radars. This repo now exports both:
 
 ```bash
-make render-sample PROVIDER=real SAMPLE_IDX=0
-make render-scene SCENE_NAME=scene-0061 CAMERA=CAM_FRONT MAX_FRAMES=24 FPS=2
+make render-sample DATASET_VERSION=v1.0-trainval PROVIDER=real SAMPLE_IDX=0
+make render-scene DATASET_VERSION=v1.0-trainval SCENE_NAME=scene-0061 CAMERA=CAM_FRONT MAX_FRAMES=24 FPS=2
 make reports-index
 ```
 
@@ -140,7 +155,7 @@ The scaffold follows the architecture in the spec:
 
 ## Current Status
 
-- Verified locally: real nuScenes-mini extraction, Kafka ingestion, MinIO/PostgreSQL, Redis, Lance, and WebDataset benchmark runs, JSON/CSV export, benchmark dashboard HTML generation, telemetry ingestion into PostgreSQL, and telemetry dashboard HTML generation.
+- Verified locally: real nuScenes-mini extraction, Kafka ingestion, MinIO/PostgreSQL, Redis, Lance, and WebDataset benchmark runs, JSON/CSV export, benchmark dashboard HTML generation, telemetry ingestion into PostgreSQL, telemetry dashboard HTML generation, and official trainval archive discovery from the AWS Open Data mirror.
 - Recent benchmark runs can be queried with `nudemo telemetry runs` and re-rendered with `nudemo telemetry dashboard`.
 - Telemetry is additive. If PostgreSQL or Docker snapshots are unavailable, the benchmark still writes the benchmark report and dashboard artifacts.
 - Target runtime: Python `3.12`; the repo bootstraps that version explicitly because the external stack is not yet a clean Python 3.13 target.
