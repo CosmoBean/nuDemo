@@ -77,14 +77,7 @@ class RedisBackend:
         thumbnail = camera[row_idx][:, col_idx].reshape(-1) / 255.0
 
         lidar = sample.lidar_top.astype(np.float32)
-        lidar_stats = np.concatenate(
-            [
-                lidar.mean(axis=0),
-                lidar.std(axis=0),
-                lidar.min(axis=0),
-                lidar.max(axis=0),
-            ]
-        )
+        lidar_stats = self._dense_stats_or_zeros(lidar)
 
         radar_stats = []
         for radar in sample.radars.values():
@@ -92,8 +85,8 @@ class RedisBackend:
             radar_stats.extend(
                 [
                     float(radar_array.shape[0]),
-                    float(radar_array[:, 0].mean()),
-                    float(radar_array[:, 1].mean()),
+                    self._column_mean_or_zero(radar_array, 0),
+                    self._column_mean_or_zero(radar_array, 1),
                 ]
             )
 
@@ -108,9 +101,32 @@ class RedisBackend:
                 ),
             ]
         )
+        features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
         embedding = np.zeros(512, dtype=np.float32)
         embedding[: min(embedding.shape[0], features.shape[0])] = features[: embedding.shape[0]]
         return embedding
+
+    @staticmethod
+    def _column_mean_or_zero(array: np.ndarray, column_idx: int) -> float:
+        if array.ndim != 2 or array.shape[0] == 0 or array.shape[1] <= column_idx:
+            return 0.0
+        return float(array[:, column_idx].mean())
+
+    @staticmethod
+    def _dense_stats_or_zeros(array: np.ndarray, default_width: int = 5) -> np.ndarray:
+        if array.ndim != 2:
+            return np.zeros(default_width * 4, dtype=np.float32)
+        width = array.shape[1] if array.shape[1] > 0 else default_width
+        if array.shape[0] == 0:
+            return np.zeros(width * 4, dtype=np.float32)
+        return np.concatenate(
+            [
+                array.mean(axis=0),
+                array.std(axis=0),
+                array.min(axis=0),
+                array.max(axis=0),
+            ]
+        ).astype(np.float32)
 
     def sequential_iter(self):
         client = self._client()
