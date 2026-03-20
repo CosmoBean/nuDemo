@@ -46,14 +46,14 @@ def build_index_html(reports_root: Path) -> str:
     <title>nuDemo Reports</title>
     <style>
       :root {{
-        --bg: #050704;
-        --panel: #10130d;
-        --line: #7e8f45;
-        --ink: #f1f4e6;
-        --muted: #b3bb93;
-        --accent: #a1b85a;
-        --accent-soft: #1b2210;
-        --shadow: 8px 8px 0 #4a5624;
+        --bg: #050507;
+        --panel: #181819;
+        --line: #6246fb;
+        --ink: #f3f7f7;
+        --muted: #aabae5;
+        --accent: #5436fc;
+        --accent-soft: #1a1a20;
+        --shadow: 8px 8px 0 #2a2170;
       }}
       * {{ box-sizing: border-box; }}
       body {{
@@ -61,8 +61,8 @@ def build_index_html(reports_root: Path) -> str:
         font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
         color: var(--ink);
         background:
-          radial-gradient(circle at top right, rgba(161,184,90,0.18), transparent 28%),
-          linear-gradient(180deg, #090b07 0%, var(--bg) 100%);
+          radial-gradient(circle at top right, rgba(84,54,252,0.2), transparent 28%),
+          linear-gradient(180deg, #09090f 0%, var(--bg) 100%);
       }}
       main {{
         max-width: 960px;
@@ -97,9 +97,9 @@ def build_index_html(reports_root: Path) -> str:
       .card {{
         padding: 18px;
         border-radius: 16px;
-        background: #171c10;
+        background: #1a1a20;
         border: 3px solid var(--line);
-        box-shadow: 5px 5px 0 #4a5624;
+        box-shadow: 5px 5px 0 #2a2170;
       }}
       .card strong {{
         display: block;

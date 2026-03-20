@@ -313,15 +313,15 @@ def build_browser_home_html() -> str:
     <title>nuDemo Browser</title>
     <style>
       :root {
-        --bg: #050704;
-        --panel: #10130d;
-        --line: #7e8f45;
-        --ink: #f1f4e6;
-        --muted: #b3bb93;
-        --accent: #a1b85a;
-        --accent-alt: #768641;
-        --accent-soft: #1b2210;
-        --shadow: 8px 8px 0 #4a5624;
+        --bg: #050507;
+        --panel: #181819;
+        --line: #6246fb;
+        --ink: #f3f7f7;
+        --muted: #aabae5;
+        --accent: #5436fc;
+        --accent-alt: #3c31bb;
+        --accent-soft: #1a1a20;
+        --shadow: 8px 8px 0 #2a2170;
       }
       * { box-sizing: border-box; }
       body {
@@ -329,8 +329,8 @@ def build_browser_home_html() -> str:
         font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
         color: var(--ink);
         background:
-          radial-gradient(circle at top right, rgba(161, 184, 90, 0.18), transparent 24%),
-          linear-gradient(180deg, #090b07 0%, var(--bg) 100%);
+          radial-gradient(circle at top right, rgba(84, 54, 252, 0.2), transparent 24%),
+          linear-gradient(180deg, #09090f 0%, var(--bg) 100%);
       }
       main {
         max-width: 1120px;
@@ -370,7 +370,7 @@ def build_browser_home_html() -> str:
         background: var(--accent);
         color: var(--ink);
         border: 2px solid var(--line);
-        box-shadow: 4px 4px 0 #4a5624;
+        box-shadow: 4px 4px 0 #2a2170;
         font-size: 0.9rem;
         margin-bottom: 16px;
         font-weight: 700;
@@ -413,9 +413,9 @@ def build_browser_home_html() -> str:
         gap: 16px;
         padding: 14px 16px;
         border-radius: 18px;
-        background: #14190e;
+        background: #1a1a20;
         border: 3px solid var(--line);
-        box-shadow: 6px 6px 0 #4a5624;
+        box-shadow: 6px 6px 0 #2a2170;
       }
       .link-row a {
         color: var(--ink);
@@ -506,16 +506,16 @@ def build_explorer_html() -> str:
     <title>nuDemo Explorer</title>
     <style>
       :root {
-        --bg: #050704;
-        --panel: #10130d;
-        --line: #7e8f45;
-        --ink: #f1f4e6;
-        --muted: #b3bb93;
-        --accent: #a1b85a;
-        --accent-alt: #768641;
-        --accent-soft: #1b2210;
-        --success-soft: #202914;
-        --shadow: 8px 8px 0 #4a5624;
+        --bg: #050507;
+        --panel: #181819;
+        --line: #6246fb;
+        --ink: #f3f7f7;
+        --muted: #aabae5;
+        --accent: #5436fc;
+        --accent-alt: #3c31bb;
+        --accent-soft: #1a1a20;
+        --success-soft: #26262e;
+        --shadow: 8px 8px 0 #2a2170;
       }
       * { box-sizing: border-box; }
       body {
@@ -523,8 +523,8 @@ def build_explorer_html() -> str:
         font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
         color: var(--ink);
         background:
-          radial-gradient(circle at top right, rgba(161, 184, 90, 0.18), transparent 20%),
-          linear-gradient(180deg, #090b07 0%, var(--bg) 100%);
+          radial-gradient(circle at top right, rgba(84, 54, 252, 0.2), transparent 20%),
+          linear-gradient(180deg, #09090f 0%, var(--bg) 100%);
       }
       main {
         max-width: 1440px;
@@ -577,7 +577,7 @@ def build_explorer_html() -> str:
         border: 3px solid var(--line);
         border-radius: 999px;
         background: var(--accent-soft);
-        box-shadow: 4px 4px 0 #4a5624;
+        box-shadow: 4px 4px 0 #2a2170;
       }
       .summary-grid {
         display: grid;
@@ -590,7 +590,7 @@ def build_explorer_html() -> str:
         border-radius: 18px;
         background: var(--panel);
         border: 3px solid var(--line);
-        box-shadow: 6px 6px 0 #4a5624;
+        box-shadow: 6px 6px 0 #2a2170;
         min-width: 0;
       }
       .summary-card strong {
@@ -620,9 +620,9 @@ def build_explorer_html() -> str:
         border-radius: 14px;
         padding: 11px 12px;
         font: inherit;
-        background: #151a11;
+        background: #1a1a20;
         color: var(--ink);
-        box-shadow: 4px 4px 0 #4a5624;
+        box-shadow: 4px 4px 0 #2a2170;
       }
       button {
         cursor: pointer;
@@ -660,7 +660,7 @@ def build_explorer_html() -> str:
         aspect-ratio: 16 / 9;
         object-fit: cover;
         display: block;
-        background: #202914;
+        background: #26262e;
       }
       .sample-card .body {
         padding: 14px;
@@ -725,7 +725,7 @@ def build_explorer_html() -> str:
         border-radius: 999px;
         background: var(--accent);
         color: var(--ink);
-        box-shadow: 3px 3px 0 #4a5624;
+        box-shadow: 3px 3px 0 #2a2170;
       }
       .detail-placeholder {
         display: grid;
@@ -744,14 +744,14 @@ def build_explorer_html() -> str:
         border-radius: 14px;
         overflow: hidden;
         background: var(--panel);
-        box-shadow: 5px 5px 0 #4a5624;
+        box-shadow: 5px 5px 0 #2a2170;
       }
       .camera-frame img {
         width: 100%;
         display: block;
         aspect-ratio: 16 / 9;
         object-fit: cover;
-        background: #202914;
+        background: #26262e;
       }
       .camera-frame strong {
         display: block;
@@ -789,10 +789,10 @@ def build_explorer_html() -> str:
       .notice {
         padding: 12px 14px;
         border-radius: 16px;
-        background: #171c10;
-        color: #dfe8b9;
+        background: #1a1a20;
+        color: #e7eeee;
         border: 3px solid var(--line);
-        box-shadow: 5px 5px 0 #4a5624;
+        box-shadow: 5px 5px 0 #2a2170;
         margin-bottom: 12px;
       }
       code {
@@ -1002,7 +1002,7 @@ def build_explorer_html() -> str:
 
         el.results.innerHTML = payload.items.map((sample) => `
           <article class="panel sample-card" data-sample="${sample.sample_idx}">
-            ${sample.preview_url ? `<img loading="lazy" src="${sample.preview_url}" alt="Sample ${sample.sample_idx}">` : `<div style="aspect-ratio:16/9;background:#202914;"></div>`}
+            ${sample.preview_url ? `<img loading="lazy" src="${sample.preview_url}" alt="Sample ${sample.sample_idx}">` : `<div style="aspect-ratio:16/9;background:#26262e;"></div>`}
             <div class="body">
               <h3>#${sample.sample_idx} · ${sample.scene_name}</h3>
               <div class="meta-list">
