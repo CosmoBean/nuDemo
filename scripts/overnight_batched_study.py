@@ -38,7 +38,7 @@ def main() -> int:
     output_root = (
         Path(args.output_root)
         if args.output_root
-        else config.runtime.reports_root / "overnight" / stamp
+        else config.runtime.reports_root / "overnight_runs" / stamp
     )
     payload = run_batched_ingest_study(
         config,

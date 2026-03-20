@@ -87,7 +87,27 @@ make overnight-study DATASET_VERSION=v1.0-trainval STUDY_BATCH_SIZE=32 BACKENDS=
 
 By default the overnight runner keeps the final `minio-postgres` load in place for the explorer and
 purges the other backends after they are benchmarked. It writes timestamped artifacts under
-`artifacts/reports/overnight/<stamp>/` plus a matching log under `artifacts/logs/`.
+`artifacts/reports/overnight_runs/<stamp>/` plus a matching log under `artifacts/logs/`.
+
+## Runtime Expectations
+
+On this machine, the full `v1.0-trainval` `minio-postgres` overnight study has already completed
+successfully over the real dataset:
+
+- Dataset size: `850` scenes, `34,149` samples, `1,166,187` annotations.
+- Batch size: `32` samples.
+- Ingest wall-clock: `4,197.6s` (`69m 58s`).
+- End-to-end study wall-clock: `8,800.1s` (`2h 26m 40s`).
+- Mean ingest throughput: `8.15 samples/sec`.
+
+That measured run is the best anchor for planning. If you run the same full study again for just
+`minio-postgres`, budget about `2.5 hours`. If you run all five backends sequentially with
+`overnight-study`, budget an actual overnight window, roughly `8-12 hours` on this host. That
+full-sweep estimate is a planning number, not a completed five-backend trainval measurement yet.
+
+The explorer reads the `minio-postgres` backend only. If that backend has been loaded with the full
+trainval set, the explorer and scene studio can show all `850` scenes immediately without waiting
+for Redis, Lance, Parquet, or WebDataset to finish.
 
 Inspect persisted telemetry history:
 
@@ -188,6 +208,116 @@ The scaffold follows the architecture in the spec:
 - Hot-path retrieval: Redis for embeddings and lightweight sample metadata.
 - Random-access dataset: Lance for evaluation and curation workflows.
 - Sequential training export: WebDataset shards for high-throughput loading.
+
+## Backend And Ingestion Architecture
+
+The real-world data path in this repo is:
+
+```text
+nuScenes trainval on disk
+  -> extraction provider
+  -> UnifiedSample records in memory
+  -> 32-sample study batches
+  -> backend-specific writer
+  -> benchmark readers
+  -> persisted telemetry in PostgreSQL
+  -> benchmark HTML + telemetry HTML + Prometheus + Grafana + explorer
+```
+
+For `minio-postgres`, one real sample fans out into:
+
+- `12` object writes to MinIO:
+  `6` camera JPEGs, `1` LiDAR `.npy`, `5` radar `.npy`
+- `1` scene upsert in PostgreSQL
+- `1` sample row insert in PostgreSQL
+- `N` annotation row inserts in PostgreSQL
+
+On the completed full trainval run, the dataset averaged `34.15` annotations per sample. At the
+measured `8.15 samples/sec` ingest rate, that maps to roughly:
+
+- `97.75` MinIO object `PUT`s/sec
+- `294.46` PostgreSQL write statements/sec
+- `16.73 MB/sec` of persisted payload bytes
+
+Those are single-runner application-level rates. They are not cluster maximums, and they are not
+synthetic HTTP load-test numbers.
+
+The backends are meant for different access shapes:
+
+- `minio-postgres`: canonical blob + metadata path; best fit for the explorer and mixed retrieval.
+- `redis`: hot metadata and embedding retrieval; no full image/LiDAR blob persistence.
+- `lance`: Arrow-native random access and curation-friendly local dataset.
+- `parquet`: columnar export for analytical scans and cheap interchange.
+- `webdataset`: tar-sharded sequential training path; no point lookup or query support.
+
+Read-side behavior differs by backend. In the current benchmark suite:
+
+- `minio-postgres` sequential scan means one ordered SQL cursor plus `2` MinIO `GET`s per sample
+  (`CAM_FRONT` and `LIDAR_TOP`).
+- `minio-postgres` random access means one SQL point lookup plus `2` MinIO `GET`s for that sample.
+- `redis` reads metadata hashes and embeddings only.
+- `lance` and `parquet` read `CAM_FRONT` and `LIDAR_TOP` from local columnar files.
+- `webdataset` is sequential only and deliberately skips random-access and curation-query tests.
+
+## How Numbers Are Calculated
+
+The benchmark and telemetry numbers are direct wall-clock calculations from the code paths under
+`src/nudemo/benchmarks/`, `src/nudemo/storage/`, and `src/nudemo/studies/`:
+
+| Metric | Calculation |
+| --- | --- |
+| Storage write throughput | `samples_written / elapsed_sec` |
+| Batch ingest p50 / p95 | Percentiles over the per-batch `elapsed_sec` values |
+| Sequential scan throughput | `total_samples / elapsed_sec` |
+| Random access latency | p50 / p95 / p99 of individual fetch latencies in milliseconds |
+| Curation query latency | Mean and stddev of query-only elapsed time |
+| End-to-end curation | Query time plus all matching fetches, plus `per_sample_ms` |
+| Disk footprint | Backend-reported bytes on disk or in object storage |
+| Service pressure | Peak Docker CPU, memory, network, block I/O, and PID counts from persisted snapshots |
+
+The concrete implementations are:
+
+- `StorageWriteResult.throughput` in `src/nudemo/storage/base.py`
+- `benchmark_sequential()` in `src/nudemo/benchmarks/runner.py`
+- `benchmark_random_access()` in `src/nudemo/benchmarks/runner.py`
+- `benchmark_curation_query()` in `src/nudemo/benchmarks/runner.py`
+- `benchmark_end_to_end_curation()` in `src/nudemo/benchmarks/runner.py`
+- `run_batched_ingest_study()` in `src/nudemo/studies/batched_ingest.py`
+- `TelemetryRecorder` in `src/nudemo/telemetry/store.py`
+
+The Prometheus exporter does not invent separate numbers. It republishes the latest persisted run,
+span, and service-snapshot values from PostgreSQL as:
+
+- `nudemo_latest_run_metric_value`
+- `nudemo_latest_span_metric_value`
+- `nudemo_latest_service_metric_value`
+
+That means the HTML dashboards, Prometheus, and Grafana are all reading the same persisted telemetry
+source of truth.
+
+## Real-World Interpretation
+
+This repo measures `samples/sec`, `messages/sec`, and fetch/query latency because a nuScenes sample
+is a composite unit, not a single blob request. When you present the system, frame the numbers like
+this:
+
+- Ingest throughput tells you how fast the pipeline can materialize synchronized multimodal samples.
+- Random-access latency tells you how fast one evaluation or curation fetch returns a sample view.
+- Sequential throughput tells you how well a backend behaves as a training/evaluation reader.
+- Curation latency tells you how expensive metadata filtering is before any sample bytes are fetched.
+- Service pressure tells you whether the bottleneck is infrastructure saturation or client-side code.
+
+A good example from the completed full `minio-postgres` trainval run:
+
+- Ingest: `8.15 samples/sec`
+- Sequential scan: `263.64 samples/sec`
+- Random access p50: `12.64 ms`
+- Curation query mean: `227.87 ms`
+- Disk footprint: `68.59 GB`
+- Peak service CPU: `96.83%` on `minio`
+
+That is the kind of backend-specific operating profile you can compare against Redis, Lance,
+Parquet, and WebDataset in the overnight study summaries.
 
 ## Current Status
 
