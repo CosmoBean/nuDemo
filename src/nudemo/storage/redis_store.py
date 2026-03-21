@@ -19,7 +19,12 @@ class RedisBackend:
     def _client(self):
         import redis
 
-        return redis.Redis(host=self.settings.host, port=self.settings.port, db=self.settings.db)
+        return redis.Redis(
+            host=self.settings.host,
+            port=self.settings.port,
+            db=self.settings.db,
+            password=self.settings.password or None,
+        )
 
     def write_samples(self, samples):
         client = self._client()

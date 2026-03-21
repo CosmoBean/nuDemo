@@ -201,31 +201,109 @@ The real integration points are implemented under `src/nudemo/`:
 Local infrastructure definitions live in `config/docker-compose.yml` and `config/init.sql`.
 Prometheus and Grafana provisioning live under `config/prometheus/` and `config/grafana/`.
 
-## Recommended Architecture
+## Architecture
 
-The scaffold follows the architecture in the spec:
-
-- Ingestion: Kafka as the replayable event bus.
-- Blob storage: MinIO or S3-compatible storage for camera, LiDAR, and radar payloads.
-- Queryable metadata: PostgreSQL for curation filters and annotation joins.
-- Hot-path retrieval: Redis for embeddings and lightweight sample metadata.
-- Random-access dataset: Lance for evaluation and curation workflows.
-- Sequential training export: WebDataset shards for high-throughput loading.
-
-## Backend And Ingestion Architecture
-
-The real-world data path in this repo is:
-
-```text
-nuScenes trainval on disk
-  -> extraction provider
-  -> UnifiedSample records in memory
-  -> 32-sample study batches
-  -> backend-specific writer
-  -> benchmark readers
-  -> persisted telemetry in PostgreSQL
-  -> benchmark HTML + telemetry HTML + Prometheus + Grafana + explorer
 ```
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                    DATA SOURCE                                              │
+│                                                                                             │
+│   nuScenes v1.0-mini (404 samples, 10 scenes)   /   v1.0-trainval (34,149 samples)         │
+│   12 sensors per sample: CAM_FRONT/BACK/FRONT_LEFT/FRONT_RIGHT/BACK_LEFT/BACK_RIGHT,       │
+│   LIDAR_TOP, RADAR_FRONT/FRONT_LEFT/FRONT_RIGHT/BACK_LEFT/BACK_RIGHT                      │
+└──────────────────────────────────────┬──────────────────────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│                              EXTRACTION LAYER  (src/nudemo/extraction/)                     │
+│                                                                                             │
+│   NuScenesProvider ──► UnifiedSample records in memory                                      │
+│   SyntheticProvider  (no dataset required — deterministic fallback for CI / smoke tests)    │
+└──────────────────────────────────────┬──────────────────────────────────────────────────────┘
+                                       │  UnifiedSample stream
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│                              INGESTION LAYER  (src/nudemo/ingestion/)                       │
+│                                                                                             │
+│   Kafka broker (localhost:9092)                                                             │
+│   ├── drivelogs.raw      ← full-payload messages (camera JPEGs + LiDAR/radar .npy)         │
+│   └── drivelogs.refined  ← metadata-only messages (~4 KB each)                             │
+│                                                                                             │
+│   Measured: 20.4 msg/sec produce  │  3.4 msg/sec consume (metadata mode, 16-sample run)    │
+└──────────────────────────────────────┬──────────────────────────────────────────────────────┘
+                                       │  32-sample study batches
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│                              STORAGE LAYER  (src/nudemo/storage/)                           │
+│                                                                                             │
+│  ┌──────────────────────────┐  ┌────────────────┐  ┌──────────┐  ┌─────────┐  ┌─────────┐ │
+│  │   MinIO + PostgreSQL     │  │     Redis       │  │  Lance   │  │ Parquet │  │WebData  │ │
+│  │  (canonical blob+meta)   │  │  (hot-path /   │  │ (Arrow   │  │(columnar│  │  set    │ │
+│  │                          │  │   embeddings)   │  │ random   │  │ scans)  │  │  tars)  │ │
+│  │  MinIO: 6 cam JPEGs,     │  │                 │  │ access)  │  │         │  │         │ │
+│  │   1 LIDAR .npy,          │  │  metadata hash  │  │          │  │         │  │sequential│ │
+│  │   5 radar .npy per sample│  │  + 512-d embed  │  │ CAM_FRONT│  │CAM_FRONT│  │ only    │ │
+│  │  PostgreSQL: scenes,     │  │  per sample     │  │ LIDAR_TOP│  │LIDAR_TOP│  │         │ │
+│  │   samples, annotations   │  │                 │  │  columnar│  │ columnar│  │         │ │
+│  │                          │  │  [localhost      │  │          │  │         │  │         │ │
+│  │  8.15 samp/sec ingest    │  │   only + auth]  │  │36.9 s/s  │  │35.8 s/s │  │36.5 s/s │ │
+│  │  263.6 samp/sec scan     │  │  183 samp/sec   │  │779 s/s   │  │605 s/s  │  │635 s/s  │ │
+│  │  12.6 ms rand p50        │  │  0.76 ms p50    │  │0.85ms p50│  │19.6ms p5│  │n/a      │ │
+│  │  68.6 GB (full trainval) │  │  0.002 GB       │  │0.20 GB   │  │0.19 GB  │  │0.20 GB  │ │
+│  └──────────┬───────────────┘  └────────────────┘  └──────────┘  └─────────┘  └─────────┘ │
+└─────────────┼───────────────────────────────────────────────────────────────────────────────┘
+              │                         │  all backends
+              │                         ▼
+              │  ┌─────────────────────────────────────────────────────────────────────────┐
+              │  │                BENCHMARK & STUDY LAYER  (src/nudemo/benchmarks/, studies/)│
+              │  │                                                                          │
+              │  │  BenchmarkOrchestrator ── per-backend:                                  │
+              │  │    sequential_scan · random_access · curation_query · disk_footprint     │
+              │  │  OvernightBatchedStudy ── streams dataset in 32-sample batches,          │
+              │  │    one backend at a time, purges after benchmarking                      │
+              │  └─────────────────────────┬───────────────────────────────────────────────┘
+              │                            │
+              ▼                            ▼
+┌────────────────────────────────────────────────────────────────────────────────────────────┐
+│                         TELEMETRY & OBSERVABILITY                                          │
+│                                                                                            │
+│  TelemetryRecorder (src/nudemo/telemetry/)                                                 │
+│  └── PostgreSQL: run records · stage spans · Docker service snapshots (CPU/mem/net/IO)     │
+│                                                                                            │
+│  PrometheusExporter (src/nudemo/observability/)  :9464                                     │
+│  └── republishes latest run/span/service values from PostgreSQL                            │
+│       nudemo_latest_run_metric_value                                                       │
+│       nudemo_latest_span_metric_value                                                      │
+│       nudemo_latest_service_metric_value                                                   │
+│                                                                                            │
+│  Prometheus :9090  ──scrapes──►  Grafana :3000/grafana/                                    │
+└─────────────────────────────────┬──────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌────────────────────────────────────────────────────────────────────────────────────────────┐
+│                         BROWSER SERVING LAYER  (src/nudemo/explorer/)                      │
+│                                                                                            │
+│  Report server  :8787                         Explorer  :8788                              │
+│  ├── /                 dashboard index        ├── /explorer      scene search + cam preview │
+│  ├── /benchmark_dashboard.html                ├── /scene-studio  3D LiDAR scrubber         │
+│  ├── /telemetry_dashboard.html                └── (reads PostgreSQL + proxies MinIO blobs) │
+│  └── /grafana-dashboard  iframe proxy                                                      │
+│                                                                                            │
+│  Rendering (src/nudemo/rendering.py)                                                       │
+│  └── artifacts/reports/renders/  camera contact sheets · scene GIFs                       │
+└────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Backend quick-reference
+
+| Backend | Best fit | Ingest | Seq scan | Rand p50 | Curation | Disk (trainval) |
+|---|---|---|---|---|---|---|
+| MinIO + PostgreSQL | Explorer, mixed retrieval | 8.2 s/s | 263.6 s/s | 12.6 ms | 227.9 ms | 68.6 GB |
+| Redis | Hot embeddings, metadata cache | 183 s/s | 3,796 s/s | 0.76 ms | 3.6 ms | ~0.002 GB |
+| Lance | Random-access eval, curation | 36.9 s/s | 779 s/s | 0.85 ms | 13.7 ms | ~0.20 GB |
+| Parquet | Analytical scans, interchange | 35.8 s/s | 605 s/s | 19.6 ms | 1.9 ms | ~0.19 GB |
+| WebDataset | Sequential training export | 36.5 s/s | 635 s/s | — | — | ~0.20 GB |
+
+*Mini-set (100-sample) numbers for Redis/Lance/Parquet/WebDataset; full trainval for MinIO+PostgreSQL.*
 
 For `minio-postgres`, one real sample fans out into:
 

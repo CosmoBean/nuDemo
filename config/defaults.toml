@@ -39,6 +39,7 @@ password = "nuscenes"
 host = "localhost"
 port = 6379
 db = 0
+password = "nudemo_redis_local"
 
 [storage.lance]
 dataset_path = "artifacts/formats/lance/dataset.lance"
