@@ -588,6 +588,10 @@ def build_browser_home_html() -> str:
               <a href="/scene-studio">Open scene studio</a>
             </div>
             <div class="link-row">
+              <span>Compare all storage backends side-by-side</span>
+              <a href="/compare">Open comparison</a>
+            </div>
+            <div class="link-row">
               <span>Benchmark comparison dashboard</span>
               <a href="/benchmark_dashboard.html">Open benchmark</a>
             </div>
@@ -614,9 +618,15 @@ def build_browser_home_html() -> str:
           <a href="/scene-studio">Open studio</a>
         </section>
         <section class="card">
+          <strong>Backend Comparison</strong>
+          Compare write throughput, sequential scan, random access latency, curation speed, and disk
+          footprint across all five storage backends with ranked charts and a full metrics table.
+          <a href="/compare">Open comparison</a>
+        </section>
+        <section class="card">
           <strong>Benchmark Dashboard</strong>
-          Compare backend write, read, random access, curation, and disk behavior from the latest
-          completed run for each backend.
+          Per-run benchmark detail with stage table, dataloader throughput, and the full results
+          matrix from the latest completed run.
           <a href="/benchmark_dashboard.html">Open dashboard</a>
         </section>
         <section class="card">
@@ -1132,6 +1142,7 @@ def build_explorer_html() -> str:
       <div class="subnav">
         <a href="/">Browser home</a>
         <a href="/scene-studio">Scene studio</a>
+        <a href="/compare">Compare backends</a>
         <a href="/benchmark_dashboard.html">Benchmark dashboard</a>
         <a href="/grafana-dashboard">Grafana</a>
       </div>
@@ -2460,6 +2471,275 @@ class ExplorerApplication:
         )
 
 
+def build_compare_html() -> str:
+    return """<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>nuDemo — Backend Comparison</title>
+    <style>
+      :root {
+        --bg: #0b0b10; --panel: #161622; --line: #544bb0;
+        --ink: #e7e8f3; --muted: #b5b0cf; --accent: #6b59dd;
+        --accent-soft: #201f31; --shadow: 6px 6px 0 #211b52;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+        background: radial-gradient(circle at top right,rgba(84,54,252,.12),transparent 22%),
+                    linear-gradient(180deg,#0f0f16 0%,var(--bg) 100%);
+        color: var(--ink);
+      }
+      main { max-width: 1440px; margin: 0 auto; padding: 32px 24px 64px; }
+      .subnav {
+        display: flex; gap: 16px; flex-wrap: wrap;
+        margin-bottom: 28px; font-size: 0.9rem;
+      }
+      .subnav a { color: var(--muted); text-decoration: none; }
+      .subnav a:hover { color: var(--ink); }
+      h1 { font-size: 1.9rem; letter-spacing: -.04em; margin-bottom: 6px; }
+      h2 { font-size: 1.15rem; margin: 32px 0 14px; }
+      .pill {
+        display: inline-block; background: var(--accent); color: var(--ink);
+        font-size: 0.72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+        padding: 3px 10px; border-radius: 999px; margin-bottom: 10px;
+      }
+      .meta { color: var(--muted); font-size: 0.88rem; margin-bottom: 24px; }
+      .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+      .chip {
+        border: 2px solid var(--line); border-radius: 999px;
+        padding: 3px 12px; font-size: 0.82rem; background: var(--accent-soft);
+      }
+      .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 16px; margin-bottom: 32px;
+      }
+      .metric-card {
+        border: 3px solid var(--line); border-radius: 20px;
+        padding: 20px; background: var(--panel); box-shadow: var(--shadow);
+      }
+      .metric-card h3 { font-size: 1rem; margin-bottom: 4px; }
+      .metric-card .hint { font-size: 0.8rem; color: var(--muted); margin-bottom: 16px; }
+      .chart-row { margin-bottom: 12px; }
+      .chart-row-head {
+        display: flex; justify-content: space-between;
+        align-items: baseline; gap: 12px; margin-bottom: 5px;
+      }
+      .chart-row-head .label { font-size: 0.9rem; }
+      .chart-row-head .label small { display: block; font-size: 0.75rem; color: var(--muted); }
+      .chart-row-head .value { font-size: 0.88rem; font-weight: 700; white-space: nowrap; }
+      .chart-row-head .value.best { color: #73BF69; }
+      .chart-track {
+        height: 14px; border: 2px solid var(--line); border-radius: 999px;
+        background: var(--accent-soft); overflow: hidden;
+      }
+      .chart-bar {
+        height: 100%; min-width: 6px;
+        background: linear-gradient(90deg, var(--accent), #8e82e8);
+        border-radius: 999px;
+        transition: width 0.4s ease;
+      }
+      .chart-bar.best { background: linear-gradient(90deg, #1a7a40, #73BF69); }
+      .table-wrap {
+        overflow-x: auto; border: 3px solid var(--line);
+        border-radius: 20px; background: var(--panel); box-shadow: var(--shadow);
+        margin-bottom: 32px;
+      }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid var(--line); padding: 10px 14px; text-align: left; vertical-align: middle; }
+      th { background: var(--accent); font-size: 0.78rem; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+      tr:nth-child(even) { background: #12121c; }
+      td.best { color: #73BF69; font-weight: 700; }
+      td.rank { color: var(--muted); font-size: 0.82rem; text-align: center; }
+      .loading { color: var(--muted); padding: 48px; text-align: center; }
+      .ext-links { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
+      .ext-link {
+        border: 2px solid var(--line); border-radius: 12px; padding: 8px 16px;
+        font-size: 0.88rem; color: var(--ink); text-decoration: none;
+        background: var(--panel); transition: border-color .15s;
+      }
+      .ext-link:hover { border-color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav class="subnav">
+        <a href="/">Home</a>
+        <a href="/explorer">Explorer</a>
+        <a href="/scene-studio">Scene studio</a>
+        <a href="/benchmark_dashboard.html">Benchmark dashboard</a>
+        <a href="/grafana-dashboard">Grafana</a>
+      </nav>
+      <div class="pill">Storage Backends</div>
+      <h1>Backend Comparison</h1>
+      <p id="meta" class="meta">Loading latest benchmark data&hellip;</p>
+      <div id="recommendations" class="chip-row"></div>
+      <div class="ext-links">
+        <a class="ext-link" href="/grafana/d/nudemo-backend-comparison/nudemo-backend-comparison" target="_blank">
+          Grafana historical comparison &rarr;
+        </a>
+        <a class="ext-link" href="/grafana/d/nudemo-query-monitor/nudemo-query-latency-monitor" target="_blank">
+          Query latency monitor &rarr;
+        </a>
+        <a class="ext-link" href="/benchmark_dashboard.html">Per-run benchmark dashboard &rarr;</a>
+      </div>
+      <div id="charts" class="metrics-grid"><div class="loading">Loading charts&hellip;</div></div>
+      <h2>Full Metrics Table</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Backend</th>
+              <th>Dataset scope</th>
+              <th>Write samples/s</th>
+              <th>Sequential samples/s</th>
+              <th>Random access p50 ms</th>
+              <th>Disk MB</th>
+              <th>Curation ms</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="rows"><tr><td colspan="9" class="loading">Loading&hellip;</td></tr></tbody>
+        </table>
+      </div>
+    </main>
+    <script>
+      const METRICS = [
+        { key: "write_samples_per_sec",     title: "Write / Ingest Throughput",   unit: "samples/s", higherBetter: true },
+        { key: "sequential_samples_per_sec", title: "Sequential Scan Throughput", unit: "samples/s", higherBetter: true },
+        { key: "random_access_p50_ms",       title: "Random Access p50 Latency",  unit: "ms",        higherBetter: false },
+        { key: "curation_query_ms",          title: "Curation Query Time",         unit: "ms",        higherBetter: false },
+        { key: "disk_mb",                    title: "Disk Footprint",              unit: "MB",        higherBetter: false },
+      ];
+
+      function fmt(v, digits = 1) {
+        if (v === null || v === undefined || !Number.isFinite(Number(v))) return "n/a";
+        return Number(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: digits });
+      }
+
+      function scope(row) {
+        const parts = [];
+        if (row.samples != null && row.samples !== "") parts.push(`${row.samples} samp`);
+        if (row.scenes != null && row.scenes !== "") parts.push(`${row.scenes} sc`);
+        return parts.join(" · ") || "—";
+      }
+
+      function rank(formats, key, higherBetter) {
+        const vals = formats.map(r => Number(r[key])).filter(Number.isFinite);
+        if (!vals.length) return () => null;
+        const sorted = [...vals].sort((a, b) => higherBetter ? b - a : a - b);
+        return (row) => {
+          const v = Number(row[key]);
+          if (!Number.isFinite(v)) return null;
+          return sorted.indexOf(v) + 1;
+        };
+      }
+
+      function buildCharts(formats) {
+        return METRICS.map(({ key, title, unit, higherBetter }) => {
+          const vals = formats.map(r => Number(r[key])).filter(v => Number.isFinite(v) && v > 0);
+          const hint = higherBetter ? "higher is better" : "lower is better";
+          if (!vals.length) {
+            return `<div class="metric-card"><h3>${title}</h3><p class="hint">${hint}</p><p style="color:var(--muted)">No data available.</p></div>`;
+          }
+          const baseline = higherBetter ? Math.max(...vals) : Math.min(...vals);
+          const rows = formats
+            .filter(r => Number.isFinite(Number(r[key])) && Number(r[key]) > 0)
+            .map(r => {
+              const v = Number(r[key]);
+              const pct = Math.max(6, Math.min(100, higherBetter ? (v / baseline) * 100 : (baseline / v) * 100));
+              const isBest = v === baseline;
+              return `
+                <div class="chart-row">
+                  <div class="chart-row-head">
+                    <div class="label">${r.backend}<small>${scope(r)}</small></div>
+                    <div class="value${isBest ? " best" : ""}">${fmt(v)} ${unit}${isBest ? " ★" : ""}</div>
+                  </div>
+                  <div class="chart-track">
+                    <div class="chart-bar${isBest ? " best" : ""}" style="width:${pct.toFixed(1)}%"></div>
+                  </div>
+                </div>`;
+            }).join("");
+          return `<div class="metric-card"><h3>${title}</h3><p class="hint">${hint}</p>${rows}</div>`;
+        }).join("");
+      }
+
+      function buildTable(formats) {
+        // rank each row by write throughput as primary sort
+        const writeRank = rank(formats, "write_samples_per_sec", true);
+        const sortedFormats = [...formats].sort((a, b) => {
+          const ra = writeRank(a) ?? 999;
+          const rb = writeRank(b) ?? 999;
+          return ra - rb;
+        });
+
+        const bestWrite = Math.max(...formats.map(r => Number(r.write_samples_per_sec)).filter(Number.isFinite));
+        const bestSeq = Math.max(...formats.map(r => Number(r.sequential_samples_per_sec)).filter(Number.isFinite));
+        const bestRand = Math.min(...formats.map(r => Number(r.random_access_p50_ms)).filter(v => Number.isFinite(v) && v > 0));
+        const bestDisk = Math.min(...formats.map(r => Number(r.disk_mb)).filter(v => Number.isFinite(v) && v > 0));
+        const bestCur = Math.min(...formats.map(r => Number(r.curation_query_ms)).filter(v => Number.isFinite(v) && v > 0));
+
+        const isBest = (v, best) => Number.isFinite(Number(v)) && Number(v) === best;
+
+        return sortedFormats.map((r, i) => `
+          <tr>
+            <td class="rank">${i + 1}</td>
+            <td><strong>${r.backend}</strong></td>
+            <td style="font-size:.82rem;color:var(--muted)">${scope(r)}</td>
+            <td class="${isBest(r.write_samples_per_sec, bestWrite) ? "best" : ""}">${fmt(r.write_samples_per_sec)}</td>
+            <td class="${isBest(r.sequential_samples_per_sec, bestSeq) ? "best" : ""}">${fmt(r.sequential_samples_per_sec)}</td>
+            <td class="${isBest(r.random_access_p50_ms, bestRand) ? "best" : ""}">${fmt(r.random_access_p50_ms)}</td>
+            <td class="${isBest(r.disk_mb, bestDisk) ? "best" : ""}">${fmt(r.disk_mb)}</td>
+            <td class="${isBest(r.curation_query_ms, bestCur) ? "best" : ""}">${fmt(r.curation_query_ms)}</td>
+            <td>${r.status}</td>
+          </tr>`).join("");
+      }
+
+      async function load() {
+        let payload;
+        try {
+          const res = await fetch("/api/benchmark/summary");
+          if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+          payload = await res.json();
+        } catch (err) {
+          document.getElementById("meta").textContent = "Could not load benchmark data: " + err.message;
+          document.getElementById("charts").innerHTML = "";
+          document.getElementById("rows").innerHTML = `<tr><td colspan="9">Error loading data.</td></tr>`;
+          return;
+        }
+
+        const formats = payload.storage_formats || [];
+        const dataset = payload.dataset || {};
+        const rec = payload.recommendations || {};
+
+        document.getElementById("meta").textContent = [
+          payload.suite_name || "Benchmark comparison",
+          dataset.provider && dataset.provider !== "mixed" ? `${dataset.provider} data` : null,
+          payload.comparison_note || null,
+        ].filter(Boolean).join(" · ");
+
+        document.getElementById("recommendations").innerHTML = Object.entries(rec)
+          .map(([stage, backend]) => `<span class="chip">${stage.replaceAll("_", " ")}: ${backend}</span>`)
+          .join("");
+
+        document.getElementById("charts").innerHTML = formats.length
+          ? buildCharts(formats)
+          : "<p style='color:var(--muted)'>No backend metrics found in the latest report.</p>";
+
+        document.getElementById("rows").innerHTML = formats.length
+          ? buildTable(formats)
+          : `<tr><td colspan="9" style="color:var(--muted)">No data.</td></tr>`;
+      }
+
+      load();
+    </script>
+  </body>
+</html>"""
+
+
 def create_app(
     config: AppConfig | None = None,
     *,
@@ -2489,6 +2769,10 @@ def create_app(
     @app.get("/scene-studio", response_class=HTMLResponse)
     def scene_studio_page() -> str:
         return build_scene_studio_html()
+
+    @app.get("/compare", response_class=HTMLResponse)
+    def compare_page() -> str:
+        return build_compare_html()
 
     @app.get("/grafana-dashboard")
     def grafana_dashboard_link(request: Request) -> RedirectResponse:
