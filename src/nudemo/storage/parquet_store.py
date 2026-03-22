@@ -89,16 +89,14 @@ class ParquetBackend:
     def sequential_iter(self):
         if not self._part_files():
             return
-        table = self._dataset().to_table(
-            columns=["sample_idx", "CAM_FRONT_bytes", "LIDAR_TOP_bytes"]
-        )
-        table = table.sort_by("sample_idx")
-        for row_idx in range(table.num_rows):
-            yield {
-                "idx": table.column("sample_idx")[row_idx].as_py(),
-                "cam": table.column("CAM_FRONT_bytes")[row_idx].as_py(),
-                "lidar": table.column("LIDAR_TOP_bytes")[row_idx].as_py(),
-            }
+        columns = ["sample_idx", "CAM_FRONT_bytes", "LIDAR_TOP_bytes"]
+        for batch in self._dataset().to_batches(columns=columns):
+            for row_idx in range(batch.num_rows):
+                yield {
+                    "idx": batch.column("sample_idx")[row_idx].as_py(),
+                    "cam": batch.column("CAM_FRONT_bytes")[row_idx].as_py(),
+                    "lidar": batch.column("LIDAR_TOP_bytes")[row_idx].as_py(),
+                }
 
     def fetch(self, sample_idx: int):
         import pyarrow.dataset as ds
