@@ -2561,6 +2561,16 @@ def build_compare_html() -> str:
         background: var(--panel); transition: border-color .15s;
       }
       .ext-link:hover { border-color: var(--accent); }
+      .redis-panel {
+        border: 2px solid #544bb0; border-radius: 16px; padding: 20px 24px;
+        background: var(--panel); margin-bottom: 32px; opacity: 0.85;
+      }
+      .redis-panel h2 { margin: 0 0 8px; font-size: 1.1rem; color: var(--muted); }
+      .redis-panel p { font-size: 0.88rem; color: var(--muted); margin-bottom: 14px; line-height: 1.6; }
+      .redis-metrics { display: flex; flex-wrap: wrap; gap: 16px; }
+      .redis-metric { border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; background: var(--accent-soft); }
+      .redis-metric .rm-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+      .redis-metric .rm-value { font-size: 1.1rem; font-weight: 700; }
     </style>
   </head>
   <body>
@@ -2586,6 +2596,16 @@ def build_compare_html() -> str:
         <a class="ext-link" href="/benchmark_dashboard.html">Per-run benchmark dashboard &rarr;</a>
       </div>
       <div id="charts" class="metrics-grid"><div class="loading">Loading charts&hellip;</div></div>
+      <div id="redis-section" style="display:none">
+        <h2>Caching Layer &mdash; Redis</h2>
+        <div class="redis-panel">
+          <p>Redis is used as a <strong>hot-path metadata index and embedding cache</strong>, not a blob storage backend.
+          It stores only sample tokens, scene metadata, annotation counts, and float embedding vectors (~2&ndash;5 KB per sample).
+          Camera JPEGs, LiDAR point clouds, and radar arrays are <em>not</em> stored in Redis &mdash; it cannot serve full-fidelity payloads.
+          Use Redis in front of a full-fidelity backend (Lance, Parquet, MinIO+PostgreSQL) to accelerate curation queries and similarity search without duplicating blob data.</p>
+          <div id="redis-metrics" class="redis-metrics"></div>
+        </div>
+      </div>
       <h2>Full Metrics Table</h2>
       <div class="table-wrap">
         <table>
@@ -2712,6 +2732,9 @@ def build_compare_html() -> str:
         }
 
         const formats = payload.storage_formats || [];
+        // Redis is the metadata/embedding cache layer — exclude from blob-storage comparison
+        const blobFormats = formats.filter(r => r.backend !== "Redis");
+        const redisData = formats.find(r => r.backend === "Redis");
         const dataset = payload.dataset || {};
         const rec = payload.recommendations || {};
 
@@ -2725,13 +2748,27 @@ def build_compare_html() -> str:
           .map(([stage, backend]) => `<span class="chip">${stage.replaceAll("_", " ")}: ${backend}</span>`)
           .join("");
 
-        document.getElementById("charts").innerHTML = formats.length
-          ? buildCharts(formats)
+        document.getElementById("charts").innerHTML = blobFormats.length
+          ? buildCharts(blobFormats)
           : "<p style='color:var(--muted)'>No backend metrics found in the latest report.</p>";
 
-        document.getElementById("rows").innerHTML = formats.length
-          ? buildTable(formats)
+        document.getElementById("rows").innerHTML = blobFormats.length
+          ? buildTable(blobFormats)
           : `<tr><td colspan="9" style="color:var(--muted)">No data.</td></tr>`;
+
+        if (redisData) {
+          document.getElementById("redis-section").style.display = "";
+          const redisMetrics = [
+            { label: "Write throughput", value: redisData.write_samples_per_sec, unit: "samples/s" },
+            { label: "Sequential scan (metadata)", value: redisData.sequential_samples_per_sec, unit: "samples/s" },
+            { label: "Random access p50", value: redisData.random_access_p50_ms, unit: "ms" },
+            { label: "Curation query", value: redisData.curation_query_ms, unit: "ms" },
+            { label: "Disk (metadata only)", value: redisData.disk_mb, unit: "MB" },
+          ];
+          document.getElementById("redis-metrics").innerHTML = redisMetrics
+            .map(m => `<div class="redis-metric"><div class="rm-label">${m.label}</div><div class="rm-value">${fmt(m.value)} <small style="font-size:.72rem;font-weight:400">${m.unit}</small></div></div>`)
+            .join("");
+        }
       }
 
       load();

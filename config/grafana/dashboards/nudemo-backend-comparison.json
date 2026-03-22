@@ -16,7 +16,7 @@
       "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
       "id": 99,
       "options": {
-        "content": "## nuDemo — Backend Comparison\nCompares **MinIO+PostgreSQL**, **Redis**, **Lance**, **Parquet**, and **WebDataset** across ingest throughput, sequential scan, random-access latency, curation query time, and disk footprint. Data is sourced directly from the telemetry database — all historical benchmark runs are included, with the best result per backend shown.",
+        "content": "## nuDemo — Backend Comparison\nCompares **MinIO+PostgreSQL**, **Lance**, **Parquet**, and **WebDataset** across ingest throughput, sequential scan, random-access latency, curation query time, and disk footprint. Data is sourced directly from the telemetry database — all historical benchmark runs are included, with the best result per backend shown.\n\n> **Redis** is excluded from this comparison — it is the metadata index and embedding cache layer, not a blob storage backend. It stores ~2–5 KB/sample (tokens + embeddings) rather than ~2 MB/sample (JPEGs + LiDAR + radar).",
         "mode": "markdown"
       },
       "title": "",
@@ -62,7 +62,7 @@
         {
           "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
           "format": "table",
-          "rawSql": "SELECT backend, MAX((metrics->>'throughput_samples_per_sec')::float) AS \"Ingest (samp/s)\" FROM telemetry_spans WHERE pattern = 'batch_ingest' AND status = 'ok' AND (metrics->>'throughput_samples_per_sec') IS NOT NULL GROUP BY backend ORDER BY 2 DESC",
+          "rawSql": "SELECT backend, MAX((metrics->>'throughput_samples_per_sec')::float) AS \"Ingest (samp/s)\" FROM telemetry_spans WHERE pattern = 'batch_ingest' AND status = 'ok' AND backend != 'Redis' AND (metrics->>'throughput_samples_per_sec') IS NOT NULL GROUP BY backend ORDER BY 2 DESC",
           "refId": "A"
         }
       ],
@@ -99,7 +99,7 @@
         {
           "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
           "format": "table",
-          "rawSql": "SELECT backend, MAX((metrics->>'throughput_mean')::float) AS \"Seq scan (samp/s)\" FROM telemetry_spans WHERE pattern = 'sequential_scan' AND status = 'ok' AND (metrics->>'throughput_mean') IS NOT NULL GROUP BY backend ORDER BY 2 DESC",
+          "rawSql": "SELECT backend, MAX((metrics->>'throughput_mean')::float) AS \"Seq scan (samp/s)\" FROM telemetry_spans WHERE pattern = 'sequential_scan' AND status = 'ok' AND backend != 'Redis' AND (metrics->>'throughput_mean') IS NOT NULL GROUP BY backend ORDER BY 2 DESC",
           "refId": "A"
         }
       ],
@@ -129,7 +129,7 @@
         {
           "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
           "format": "table",
-          "rawSql": "SELECT backend, MIN((metrics->>'latency_p50_ms')::float) AS \"Random p50 (ms)\" FROM telemetry_spans WHERE pattern = 'random_access' AND status = 'ok' AND (metrics->>'latency_p50_ms') IS NOT NULL GROUP BY backend ORDER BY 2 ASC",
+          "rawSql": "SELECT backend, MIN((metrics->>'latency_p50_ms')::float) AS \"Random p50 (ms)\" FROM telemetry_spans WHERE pattern = 'random_access' AND status = 'ok' AND backend != 'Redis' AND (metrics->>'latency_p50_ms') IS NOT NULL GROUP BY backend ORDER BY 2 ASC",
           "refId": "A"
         }
       ],
@@ -159,7 +159,7 @@
         {
           "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
           "format": "table",
-          "rawSql": "SELECT backend, MIN((metrics->>'query_time_ms_mean')::float) AS \"Curation (ms)\" FROM telemetry_spans WHERE pattern = 'curation_query' AND status = 'ok' AND (metrics->>'query_time_ms_mean') IS NOT NULL GROUP BY backend ORDER BY 2 ASC",
+          "rawSql": "SELECT backend, MIN((metrics->>'query_time_ms_mean')::float) AS \"Curation (ms)\" FROM telemetry_spans WHERE pattern = 'curation_query' AND status = 'ok' AND backend != 'Redis' AND (metrics->>'query_time_ms_mean') IS NOT NULL GROUP BY backend ORDER BY 2 ASC",
           "refId": "A"
         }
       ],
@@ -196,7 +196,7 @@
         {
           "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
           "format": "table",
-          "rawSql": "SELECT backend, MAX((metrics->>'disk_bytes')::float) AS \"Disk (bytes)\" FROM telemetry_spans WHERE pattern = 'disk_footprint' AND status = 'ok' AND (metrics->>'disk_bytes') IS NOT NULL GROUP BY backend ORDER BY 2 DESC",
+          "rawSql": "SELECT backend, MAX((metrics->>'disk_bytes')::float) AS \"Disk (bytes)\" FROM telemetry_spans WHERE pattern = 'disk_footprint' AND status = 'ok' AND backend != 'Redis' AND (metrics->>'disk_bytes') IS NOT NULL GROUP BY backend ORDER BY 2 DESC",
           "refId": "A"
         }
       ],
