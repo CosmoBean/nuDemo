@@ -1,0 +1,283 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "title": "Query Latency Monitor",
+      "type": "link",
+      "url": "/grafana/d/nudemo-query-monitor/nudemo-query-latency-monitor",
+      "targetBlank": false
+    }
+  ],
+  "panels": [
+    {
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "id": 99,
+      "options": {
+        "content": "## nuDemo — Backend Comparison\nCompares **MinIO+PostgreSQL**, **Redis**, **Lance**, **Parquet**, and **WebDataset** across ingest throughput, sequential scan, random-access latency, curation query time, and disk footprint. Data is sourced directly from the telemetry database — all historical benchmark runs are included, with the best result per backend shown.",
+        "mode": "markdown"
+      },
+      "title": "",
+      "transparent": true,
+      "type": "text"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 3 },
+      "id": 100,
+      "title": "Ingest Throughput  (samples / sec — higher is better)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 80 }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "minio-postgres" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "#5794F2", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Redis" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "#73BF69", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Lance" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "#F2CC0C", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "Parquet" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "#FF9830", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "WebDataset" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "#F2495C", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 4 },
+      "id": 1,
+      "options": {
+        "displayMode": "gradient", "minVizHeight": 10, "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+          "format": "table",
+          "rawSql": "SELECT backend, MAX((metrics->>'throughput_samples_per_sec')::float) AS \"Ingest (samp/s)\" FROM telemetry_spans WHERE pattern = 'batch_ingest' AND status = 'ok' AND (metrics->>'throughput_samples_per_sec') IS NOT NULL GROUP BY backend ORDER BY 2 DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Best Ingest Throughput per Backend",
+      "transformations": [
+        { "id": "groupingToMatrix",
+          "options": { "columnField": "backend", "rowField": "backend", "valueField": "Ingest (samp/s)" }
+        }
+      ],
+      "type": "bargauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 },
+      "id": 101,
+      "title": "Sequential Scan vs Random Access vs Curation Query",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "color": { "mode": "palette-classic" } },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 14 },
+      "id": 2,
+      "options": {
+        "displayMode": "gradient", "minVizHeight": 10, "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+          "format": "table",
+          "rawSql": "SELECT backend, MAX((metrics->>'throughput_mean')::float) AS \"Seq scan (samp/s)\" FROM telemetry_spans WHERE pattern = 'sequential_scan' AND status = 'ok' AND (metrics->>'throughput_mean') IS NOT NULL GROUP BY backend ORDER BY 2 DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Sequential Scan (samp/s, higher = better)",
+      "transformations": [
+        { "id": "groupingToMatrix",
+          "options": { "columnField": "backend", "rowField": "backend", "valueField": "Seq scan (samp/s)" }
+        }
+      ],
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "min": 0, "color": { "mode": "palette-classic" } },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 14 },
+      "id": 3,
+      "options": {
+        "displayMode": "gradient", "minVizHeight": 10, "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+          "format": "table",
+          "rawSql": "SELECT backend, MIN((metrics->>'latency_p50_ms')::float) AS \"Random p50 (ms)\" FROM telemetry_spans WHERE pattern = 'random_access' AND status = 'ok' AND (metrics->>'latency_p50_ms') IS NOT NULL GROUP BY backend ORDER BY 2 ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Random Access p50 (ms, lower = better)",
+      "transformations": [
+        { "id": "groupingToMatrix",
+          "options": { "columnField": "backend", "rowField": "backend", "valueField": "Random p50 (ms)" }
+        }
+      ],
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "min": 0, "color": { "mode": "palette-classic" } },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 14 },
+      "id": 4,
+      "options": {
+        "displayMode": "gradient", "minVizHeight": 10, "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+          "format": "table",
+          "rawSql": "SELECT backend, MIN((metrics->>'query_time_ms_mean')::float) AS \"Curation (ms)\" FROM telemetry_spans WHERE pattern = 'curation_query' AND status = 'ok' AND (metrics->>'query_time_ms_mean') IS NOT NULL GROUP BY backend ORDER BY 2 ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Curation Query Time (ms, lower = better)",
+      "transformations": [
+        { "id": "groupingToMatrix",
+          "options": { "columnField": "backend", "rowField": "backend", "valueField": "Curation (ms)" }
+        }
+      ],
+      "type": "bargauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "id": 102,
+      "title": "Disk Footprint",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+      "fieldConfig": {
+        "defaults": { "unit": "decbytes", "min": 0, "color": { "mode": "palette-classic" } },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "id": 5,
+      "options": {
+        "displayMode": "gradient", "minVizHeight": 10, "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+          "format": "table",
+          "rawSql": "SELECT backend, MAX((metrics->>'disk_bytes')::float) AS \"Disk (bytes)\" FROM telemetry_spans WHERE pattern = 'disk_footprint' AND status = 'ok' AND (metrics->>'disk_bytes') IS NOT NULL GROUP BY backend ORDER BY 2 DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "Disk Footprint per Backend",
+      "transformations": [
+        { "id": "groupingToMatrix",
+          "options": { "columnField": "backend", "rowField": "backend", "valueField": "Disk (bytes)" }
+        }
+      ],
+      "type": "bargauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "id": 103,
+      "title": "Full Comparison Table — All Benchmark Runs",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "elapsed_sec" },
+            "properties": [{ "id": "unit", "value": "s" }, { "id": "displayName", "value": "Elapsed" }] },
+          { "matcher": { "id": "byName", "options": "sample_count" },
+            "properties": [{ "id": "displayName", "value": "Samples" }] },
+          { "matcher": { "id": "byName", "options": "backend" },
+            "properties": [{ "id": "displayName", "value": "Backend" }] },
+          { "matcher": { "id": "byName", "options": "pattern" },
+            "properties": [{ "id": "displayName", "value": "Operation" }] },
+          { "matcher": { "id": "byName", "options": "stage" },
+            "properties": [{ "id": "displayName", "value": "Stage" }] },
+          { "matcher": { "id": "byName", "options": "started_at" },
+            "properties": [{ "id": "displayName", "value": "Run At" }, { "id": "unit", "value": "dateTimeAsLocal" }] }
+        ]
+      },
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 33 },
+      "id": 6,
+      "options": {
+        "footer": { "show": false }, "showHeader": true,
+        "sortBy": [{ "desc": false, "displayName": "Backend" }]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+          "format": "table",
+          "rawSql": "SELECT s.backend, s.stage, s.pattern, s.status, s.sample_count, s.elapsed_sec, s.started_at, r.suite_name FROM telemetry_spans s JOIN telemetry_runs r ON s.run_id = r.run_id WHERE s.pattern NOT IN ('batch_ingest') AND s.status = 'ok' ORDER BY s.backend, s.stage, s.pattern, s.started_at DESC",
+          "refId": "A"
+        }
+      ],
+      "title": "All Benchmark Spans",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 47 },
+      "id": 104,
+      "title": "Backend Selection Guide",
+      "type": "row"
+    },
+    {
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 48 },
+      "id": 7,
+      "options": {
+        "content": "| Backend | Best for | Avoid when |\n|---|---|---|\n| **MinIO + PostgreSQL** | Mixed retrieval, explorer UI, curation with blob fetch | Cost-sensitive hot paths |\n| **Redis** | Sub-ms metadata lookup, embedding cache, hot-path serving | Full-payload blob retrieval, large disk budgets |\n| **Lance** | Random-access evaluation, curation workflows, Arrow-native pipelines | Sequential-only training loops |\n| **Parquet** | Analytical scans, cheap interchange, columnar queries | Point lookups, streaming training |\n| **WebDataset** | High-throughput sequential training (DALI / PyTorch DataLoader) | Random access, curation, any point query |",
+        "mode": "markdown"
+      },
+      "title": "Backend Selection Guide",
+      "type": "text"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["nudemo", "benchmark", "comparison"],
+  "templating": { "list": [] },
+  "time": { "from": "now-7d", "to": "now" },
+  "timezone": "browser",
+  "title": "nuDemo — Backend Comparison",
+  "uid": "nudemo-backend-comparison",
+  "version": 1,
+  "weekStart": ""
+}

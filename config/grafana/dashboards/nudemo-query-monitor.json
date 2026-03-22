@@ -1,0 +1,332 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "title": "Backend Comparison",
+      "type": "link",
+      "url": "/grafana/d/nudemo-backend-comparison/nudemo-backend-comparison",
+      "targetBlank": false
+    }
+  ],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Latest Run — Query Latency",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 50 },
+            { "color": "red", "value": 500 }
+          ]}
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "nudemo_latest_span_metric_value{pattern=\"curation_query\",metric_name=\"query_time_ms_mean\",status=\"ok\"}",
+          "instant": true, "legendFormat": "{{backend}}", "refId": "A" }
+      ],
+      "title": "Curation Query Time (ms)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 10 },
+            { "color": "red", "value": 100 }
+          ]}
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+      "id": 2,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "nudemo_latest_span_metric_value{pattern=\"random_access\",metric_name=\"latency_p50_ms\",status=\"ok\"}",
+          "instant": true, "legendFormat": "{{backend}} p50", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "nudemo_latest_span_metric_value{pattern=\"random_access\",metric_name=\"latency_p95_ms\",status=\"ok\"}",
+          "instant": true, "legendFormat": "{{backend}} p95", "refId": "B" }
+      ],
+      "title": "Random Access Latency p50 / p95",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "yellow", "value": 50 },
+            { "color": "green", "value": 200 }
+          ]}
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
+      "id": 3,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "nudemo_latest_span_metric_value{pattern=\"sequential_scan\",metric_name=\"throughput_mean\",status=\"ok\"}",
+          "instant": true, "legendFormat": "{{backend}}", "refId": "A" }
+      ],
+      "title": "Sequential Scan (samples/sec)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 5 },
+            { "color": "red", "value": 20 }
+          ]}
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
+      "id": 4,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "nudemo_latest_span_metric_value{pattern=\"e2e_curation\",metric_name=\"per_sample_ms\",status=\"ok\"}",
+          "instant": true, "legendFormat": "{{backend}}", "refId": "A" }
+      ],
+      "title": "E2E Curation per Sample (ms)",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "id": 101,
+      "title": "Query Latency Breakdown",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "min": 0,
+          "color": { "mode": "palette-classic" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 100 },
+            { "color": "red", "value": 1000 }
+          ]},
+          "custom": { "fillOpacity": 80, "gradientMode": "none" }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 8 },
+      "id": 5,
+      "options": { "displayMode": "gradient", "minVizHeight": 10, "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true, "text": {} },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "nudemo_latest_span_metric_value{pattern=\"curation_query\",metric_name=\"query_time_ms_mean\",status=\"ok\"}",
+          "instant": true, "legendFormat": "{{backend}}", "refId": "A" }
+      ],
+      "title": "Curation Query — Mean Time (ms, lower = faster)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 80 }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 8 },
+      "id": 6,
+      "options": { "displayMode": "gradient", "minVizHeight": 10, "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "nudemo_latest_span_metric_value{pattern=\"random_access\",metric_name=\"latency_p50_ms\",status=\"ok\"}",
+          "instant": true, "legendFormat": "{{backend}} p50", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "nudemo_latest_span_metric_value{pattern=\"random_access\",metric_name=\"latency_p95_ms\",status=\"ok\"}",
+          "instant": true, "legendFormat": "{{backend}} p95", "refId": "B" },
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "nudemo_latest_span_metric_value{pattern=\"random_access\",metric_name=\"latency_p99_ms\",status=\"ok\"}",
+          "instant": true, "legendFormat": "{{backend}} p99", "refId": "C" }
+      ],
+      "title": "Random Access — p50 / p95 / p99 (ms, lower = faster)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0,
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 80 }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 8 },
+      "id": 7,
+      "options": { "displayMode": "gradient", "minVizHeight": 10, "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "nudemo_latest_span_metric_value{pattern=\"sequential_scan\",metric_name=\"throughput_mean\",status=\"ok\"}",
+          "instant": true, "legendFormat": "{{backend}}", "refId": "A" }
+      ],
+      "title": "Sequential Scan Throughput (samples/sec, higher = faster)",
+      "type": "bargauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
+      "id": 102,
+      "title": "Service Health During Queries",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0, "max": 100,
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 50 },
+            { "color": "red", "value": 80 }
+          ]}
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 18 },
+      "id": 8,
+      "options": { "displayMode": "gradient", "minVizHeight": 10, "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "nudemo_latest_service_metric_value{metric_name=\"peak_cpu_percent\"}",
+          "instant": true, "legendFormat": "{{service}}", "refId": "A" }
+      ],
+      "title": "Peak CPU % by Service",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "min": 0,
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 18 },
+      "id": 9,
+      "options": { "displayMode": "gradient", "minVizHeight": 10, "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "nudemo_latest_service_metric_value{metric_name=\"peak_mem_usage_bytes\"}",
+          "instant": true, "legendFormat": "{{service}}", "refId": "A" }
+      ],
+      "title": "Peak Memory Usage by Service",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "Bps", "min": 0,
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 18 },
+      "id": 10,
+      "options": { "displayMode": "gradient", "minVizHeight": 10, "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "nudemo_latest_service_metric_value{metric_name=\"peak_net_output_bytes\"}",
+          "instant": true, "legendFormat": "{{service}} out", "refId": "A" },
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "nudemo_latest_service_metric_value{metric_name=\"peak_net_input_bytes\"}",
+          "instant": true, "legendFormat": "{{service}} in", "refId": "B" }
+      ],
+      "title": "Peak Network I/O by Service",
+      "type": "bargauge"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
+      "id": 103,
+      "title": "Bottleneck Spans",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [
+        { "matcher": { "id": "byName", "options": "Value" },
+          "properties": [{ "id": "unit", "value": "s" }, { "id": "displayName", "value": "Elapsed (s)" }] },
+        { "matcher": { "id": "byName", "options": "backend" },
+          "properties": [{ "id": "displayName", "value": "Backend" }] },
+        { "matcher": { "id": "byName", "options": "pattern" },
+          "properties": [{ "id": "displayName", "value": "Operation" }] },
+        { "matcher": { "id": "byName", "options": "stage" },
+          "properties": [{ "id": "displayName", "value": "Stage" }] }
+      ]},
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 27 },
+      "id": 11,
+      "options": { "footer": { "show": false }, "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "Elapsed (s)" }] },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
+          "expr": "topk(15, nudemo_latest_span_metric_value{metric_name=\"elapsed_sec\"})",
+          "format": "table", "instant": true, "refId": "A" }
+      ],
+      "title": "Top Bottleneck Spans — Latest Run",
+      "type": "table"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["nudemo", "query-monitor"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "title": "nuDemo — Query Latency Monitor",
+  "uid": "nudemo-query-monitor",
+  "version": 1,
+  "weekStart": ""
+}
