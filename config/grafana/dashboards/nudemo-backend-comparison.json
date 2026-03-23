@@ -267,6 +267,74 @@
       },
       "title": "Backend Selection Guide",
       "type": "text"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 55 },
+      "id": 105,
+      "title": "Stage Summary — All Runs",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "stage" },
+            "properties": [{ "id": "displayName", "value": "Stage" }] },
+          { "matcher": { "id": "byName", "options": "runs" },
+            "properties": [{ "id": "displayName", "value": "Total Runs" }] },
+          { "matcher": { "id": "byName", "options": "ok_runs" },
+            "properties": [{ "id": "displayName", "value": "OK Runs" }] },
+          { "matcher": { "id": "byName", "options": "avg_elapsed_sec" },
+            "properties": [{ "id": "displayName", "value": "Avg Elapsed (s)" }, { "id": "unit", "value": "s" }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 56 },
+      "id": 106,
+      "options": { "footer": { "show": false }, "showHeader": true },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+          "format": "table",
+          "rawSql": "SELECT stage, COUNT(*) AS runs, SUM(CASE WHEN status = 'ok' THEN 1 ELSE 0 END) AS ok_runs, ROUND(AVG(elapsed_sec)::numeric, 3) AS avg_elapsed_sec FROM telemetry_spans GROUP BY stage ORDER BY stage",
+          "refId": "A"
+        }
+      ],
+      "title": "Stage Summary",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "backend" },
+            "properties": [{ "id": "displayName", "value": "Backend" }] },
+          { "matcher": { "id": "byName", "options": "stage" },
+            "properties": [{ "id": "displayName", "value": "Stage" }] },
+          { "matcher": { "id": "byName", "options": "pattern" },
+            "properties": [{ "id": "displayName", "value": "Pattern" }] },
+          { "matcher": { "id": "byName", "options": "sample_count" },
+            "properties": [{ "id": "displayName", "value": "Samples" }] },
+          { "matcher": { "id": "byName", "options": "elapsed_sec" },
+            "properties": [{ "id": "displayName", "value": "Elapsed (s)" }, { "id": "unit", "value": "s" }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 56 },
+      "id": 107,
+      "options": { "footer": { "show": false }, "showHeader": true,
+        "sortBy": [{ "desc": false, "displayName": "Stage" }] },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+          "format": "table",
+          "rawSql": "SELECT backend, stage, pattern, status, sample_count, ROUND(elapsed_sec::numeric, 3) AS elapsed_sec FROM telemetry_spans WHERE status = 'ok' ORDER BY stage, backend, pattern",
+          "refId": "A"
+        }
+      ],
+      "title": "Access Pattern Matrix",
+      "type": "table"
     }
   ],
   "refresh": "1m",

@@ -592,10 +592,6 @@ def build_browser_home_html() -> str:
               <a href="/scene-studio">Open scene studio</a>
             </div>
             <div class="link-row">
-              <span>Benchmark comparison dashboard</span>
-              <a href="/benchmark_dashboard.html">Open benchmark</a>
-            </div>
-            <div class="link-row">
               <span>Telemetry, service pressure, and bottlenecks in Grafana</span>
               <a href="/grafana-dashboard">Open Grafana</a>
             </div>
@@ -622,12 +618,6 @@ def build_browser_home_html() -> str:
           Focus on one scene at a time with a scrubber, live sample switching, and a 3D LiDAR
           point-cloud viewer driven by the stored nuScenes payloads.
           <a href="/scene-studio">Open studio</a>
-        </section>
-        <section class="card">
-          <strong>Benchmark Dashboard</strong>
-          Per-run benchmark detail with stage table, dataloader throughput, and the full results
-          matrix from the latest completed run.
-          <a href="/benchmark_dashboard.html">Open dashboard</a>
         </section>
         <section class="card">
           <strong>Grafana Observability</strong>
@@ -1136,7 +1126,6 @@ def build_explorer_html() -> str:
         <a href="/">Browser home</a>
         <a href="/scene-studio">Scene studio</a>
         <a href="/compare">Compare backends</a>
-        <a href="/benchmark_dashboard.html">Benchmark dashboard</a>
         <a href="/grafana-dashboard">Grafana</a>
       </div>
       <div class="shell">
@@ -1851,7 +1840,6 @@ def build_scene_studio_html() -> str:
         <a href="/">Browser home</a>
         <a href="/explorer">Explorer</a>
         <a href="/scene-studio">Scene studio</a>
-        <a href="/benchmark_dashboard.html">Benchmark dashboard</a>
         <a href="/grafana-dashboard">Grafana</a>
       </div>
 
@@ -2442,7 +2430,6 @@ def build_compare_html() -> str:
         <a href="/">Home</a>
         <a href="/explorer">Explorer</a>
         <a href="/scene-studio">Scene studio</a>
-        <a href="/benchmark_dashboard.html">Benchmark dashboard</a>
         <a href="/grafana-dashboard">Grafana</a>
       </nav>
       <div class="pill">Storage Backends</div>
@@ -2456,7 +2443,6 @@ def build_compare_html() -> str:
         <a class="ext-link" href="/grafana/d/nudemo-query-monitor/nudemo-query-latency-monitor" target="_blank">
           Query latency monitor &rarr;
         </a>
-        <a class="ext-link" href="/benchmark_dashboard.html">Per-run benchmark dashboard &rarr;</a>
       </div>
       <div id="charts" class="metrics-grid"><div class="loading">Loading charts&hellip;</div></div>
       <div id="redis-section" style="display:none">
