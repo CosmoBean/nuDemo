@@ -455,7 +455,7 @@ def build_browser_home_html() -> str:
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
+        font-family: "Ubuntu Mono", "IBM Plex Mono", monospace;
         color: var(--ink);
         background:
           radial-gradient(circle at top right, rgba(84, 54, 252, 0.12), transparent 24%),
@@ -580,16 +580,16 @@ def build_browser_home_html() -> str:
           </div>
           <div class="links">
             <div class="link-row">
+              <span>Compare all storage backends side-by-side</span>
+              <a href="/compare">Open comparison</a>
+            </div>
+            <div class="link-row">
               <span>Search and preview ingested samples</span>
               <a href="/explorer">Open explorer</a>
             </div>
             <div class="link-row">
               <span>Scene player with 3D LiDAR rendering</span>
               <a href="/scene-studio">Open scene studio</a>
-            </div>
-            <div class="link-row">
-              <span>Compare all storage backends side-by-side</span>
-              <a href="/compare">Open comparison</a>
             </div>
             <div class="link-row">
               <span>Benchmark comparison dashboard</span>
@@ -606,9 +606,15 @@ def build_browser_home_html() -> str:
       <div class="section-title">Views</div>
       <div class="card-grid">
         <section class="card">
+          <strong>Backend Comparison</strong>
+          Compare write throughput, sequential scan, random access latency, curation speed, and disk
+          footprint across all four blob storage backends with ranked charts and a full metrics table.
+          <a href="/compare">Open comparison</a>
+        </section>
+        <section class="card">
           <strong>Explorer</strong>
-          Search by token, scene, location, or annotation category. Compare stored formats against
-          Parquet, inspect processed camera images, and preview LiDAR geometry for each sample.
+          Search by token, scene, location, or annotation category. Inspect processed camera images
+          and preview LiDAR geometry for each sample.
           <a href="/explorer">Go to explorer</a>
         </section>
         <section class="card">
@@ -616,12 +622,6 @@ def build_browser_home_html() -> str:
           Focus on one scene at a time with a scrubber, live sample switching, and a 3D LiDAR
           point-cloud viewer driven by the stored nuScenes payloads.
           <a href="/scene-studio">Open studio</a>
-        </section>
-        <section class="card">
-          <strong>Backend Comparison</strong>
-          Compare write throughput, sequential scan, random access latency, curation speed, and disk
-          footprint across all five storage backends with ranked charts and a full metrics table.
-          <a href="/compare">Open comparison</a>
         </section>
         <section class="card">
           <strong>Benchmark Dashboard</strong>
@@ -666,7 +666,7 @@ def build_explorer_html() -> str:
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        font-family: "Space Grotesk", "IBM Plex Sans", "Avenir Next", sans-serif;
+        font-family: "Ubuntu Mono", "IBM Plex Mono", monospace;
         color: var(--ink);
         background:
           radial-gradient(circle at top right, rgba(84, 54, 252, 0.12), transparent 20%),
@@ -733,13 +733,6 @@ def build_explorer_html() -> str:
         grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
         gap: 14px;
         margin-bottom: 18px;
-      }
-      .compare-panel {
-        padding: 18px;
-        margin-bottom: 18px;
-      }
-      .compare-panel p {
-        margin-bottom: 12px;
       }
       .chart-grid {
         display: grid;
@@ -1109,7 +1102,7 @@ def build_explorer_html() -> str:
         margin-bottom: 12px;
       }
       code {
-        font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+        font-family: "Ubuntu Mono", "IBM Plex Mono", "SFMono-Regular", monospace;
         background: var(--accent-soft);
         color: var(--ink);
         padding: 2px 6px;
@@ -1194,30 +1187,6 @@ def build_explorer_html() -> str:
 
         <section class="content">
           <div id="summary" class="summary-grid"></div>
-          <section class="panel compare-panel">
-            <h2 style="margin-bottom: 4px;">Storage Format Comparison</h2>
-            <p id="benchmark_meta">Waiting for the latest benchmark report...</p>
-            <div id="benchmark_recommendations" class="chip-row"></div>
-            <div id="benchmark_charts" class="chart-grid"></div>
-            <div class="table-wrap">
-              <table class="format-table">
-                <thead>
-                  <tr>
-                    <th>Backend</th>
-                    <th>Write samples/s</th>
-                    <th>Sequential samples/s</th>
-                    <th>Random access p50 ms</th>
-                    <th>Disk MB</th>
-                    <th>Curation ms</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody id="benchmark_rows">
-                  <tr><td colspan="7">No benchmark report loaded yet.</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
           <div class="results-head">
             <div>
               <h2 style="margin-bottom: 4px;">Loaded samples</h2>
@@ -1267,10 +1236,6 @@ def build_explorer_html() -> str:
         apply: document.getElementById("apply"),
         reset: document.getElementById("reset"),
         summary: document.getElementById("summary"),
-        benchmarkMeta: document.getElementById("benchmark_meta"),
-        benchmarkRecommendations: document.getElementById("benchmark_recommendations"),
-        benchmarkCharts: document.getElementById("benchmark_charts"),
-        benchmarkRows: document.getElementById("benchmark_rows"),
         topLocations: document.getElementById("top_locations"),
         topCategories: document.getElementById("top_categories"),
         results: document.getElementById("results"),
@@ -1367,96 +1332,6 @@ def build_explorer_html() -> str:
           pieces.push(`${String(row.scenes)} scenes`);
         }
         return pieces.join(" · ") || "scope unavailable";
-      }
-
-      function buildBenchmarkCharts(formats) {
-        const configs = [
-          ["Write Throughput", "write_samples_per_sec", "higher is better", true, "samples/s"],
-          ["Sequential Read", "sequential_samples_per_sec", "higher is better", true, "samples/s"],
-          ["Random Access", "random_access_p50_ms", "lower is better", false, "ms p50"],
-          ["Curation Query", "curation_query_ms", "lower is better", false, "ms"],
-          ["Disk Footprint", "disk_mb", "lower is better", false, "MB"],
-        ];
-        return configs.map(([title, key, subtitle, higherBetter, unit]) => {
-          const values = formats
-            .map((row) => Number(row[key]))
-            .filter((value) => Number.isFinite(value) && value > 0);
-          if (!values.length) {
-            return `
-              <section class="metric-chart">
-                <h3>${title}</h3>
-                <p>${subtitle}</p>
-                <div class="meta-list">No data captured for this metric.</div>
-              </section>
-            `;
-          }
-          const baseline = higherBetter ? Math.max(...values) : Math.min(...values);
-          const rows = formats
-            .filter((row) => Number.isFinite(Number(row[key])) && Number(row[key]) > 0)
-            .map((row) => {
-              const numeric = Number(row[key]);
-              const width = higherBetter ? (numeric / baseline) * 100 : (baseline / numeric) * 100;
-              return `
-                <div class="chart-row">
-                  <div class="chart-row-head">
-                    <div>
-                      <strong>${row.backend}</strong>
-                      <span class="backend-meta">${formatScope(row)}</span>
-                    </div>
-                    <span>${formatMetric(numeric)} ${unit}</span>
-                  </div>
-                  <div class="chart-track">
-                    <div class="chart-bar" style="width:${Math.max(8, Math.min(width, 100)).toFixed(2)}%"></div>
-                  </div>
-                </div>
-              `;
-            })
-            .join("");
-          return `
-            <section class="metric-chart">
-              <h3>${title}</h3>
-              <p>${subtitle}</p>
-              ${rows}
-            </section>
-          `;
-        }).join("");
-      }
-
-      function renderBenchmarkSummary(payload) {
-        const dataset = payload.dataset || {};
-        const formats = payload.storage_formats || [];
-        el.benchmarkMeta.textContent = [
-          payload.suite_name || "Benchmark report",
-          dataset.provider ? `${dataset.provider} provider` : null,
-          dataset.samples !== undefined ? `${String(dataset.samples)} samples` : null,
-          dataset.scenes !== undefined ? `${String(dataset.scenes)} scenes` : null,
-          payload.comparison_note || null,
-        ].filter(Boolean).join(" · ");
-
-        const recommendationEntries = Object.entries(payload.recommendations || {});
-        el.benchmarkRecommendations.innerHTML = recommendationEntries.map(([stage, backend]) => `
-          <span class="chip">${stage.replaceAll("_", " ")}: ${backend}</span>
-        `).join("");
-
-        if (!formats.length) {
-          el.benchmarkCharts.innerHTML = "";
-          el.benchmarkRows.innerHTML = `<tr><td colspan="7">No storage backend metrics were found in the latest report.</td></tr>`;
-          return;
-        }
-
-        el.benchmarkCharts.innerHTML = buildBenchmarkCharts(formats);
-
-        el.benchmarkRows.innerHTML = formats.map((row) => `
-          <tr class="${row.backend === "Parquet" ? "parquet-row" : ""}">
-            <td class="backend-name">${row.backend}<span class="backend-meta">${formatScope(row)}</span></td>
-            <td>${formatMetric(row.write_samples_per_sec)}</td>
-            <td>${formatMetric(row.sequential_samples_per_sec)}</td>
-            <td>${formatMetric(row.random_access_p50_ms)}</td>
-            <td>${formatMetric(row.disk_mb)}</td>
-            <td>${formatMetric(row.curation_query_ms)}</td>
-            <td class="status-${row.status}">${row.status}</td>
-          </tr>
-        `).join("");
       }
 
       function renderResults(payload) {
@@ -1611,17 +1486,6 @@ def build_explorer_html() -> str:
         renderResults(payload);
       }
 
-      async function loadBenchmarkSummary() {
-        try {
-          const payload = await requestJson("/api/benchmark/summary");
-          renderBenchmarkSummary(payload);
-        } catch (error) {
-          el.benchmarkMeta.textContent = error.message;
-          el.benchmarkRecommendations.innerHTML = "";
-          el.benchmarkRows.innerHTML = `<tr><td colspan="7">Benchmark comparison is unavailable.</td></tr>`;
-        }
-      }
-
       async function loadDetail(sampleIdx) {
         const sample = await requestJson(`/api/samples/${sampleIdx}`);
         renderDetail(sample);
@@ -1675,7 +1539,6 @@ def build_explorer_html() -> str:
       (async () => {
         try {
           await loadFilters();
-          await loadBenchmarkSummary();
           await refresh(true);
         } catch (error) {
           showNotice(error.message);
@@ -1711,7 +1574,7 @@ def build_scene_studio_html() -> str:
       body {
         margin: 0;
         color: var(--ink);
-        font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+        font-family: "Ubuntu Mono", "IBM Plex Mono", monospace;
         background:
           radial-gradient(circle at top right, rgba(84, 54, 252, 0.14), transparent 24%),
           linear-gradient(180deg, #0f0f16 0%, var(--bg) 100%);
@@ -1957,7 +1820,7 @@ def build_scene_studio_html() -> str:
         margin-bottom: 12px;
       }
       code {
-        font-family: "IBM Plex Mono", monospace;
+        font-family: "Ubuntu Mono", "IBM Plex Mono", monospace;
         background: var(--accent-soft);
         color: var(--ink);
         padding: 2px 6px;
@@ -2486,7 +2349,7 @@ def build_compare_html() -> str:
       }
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body {
-        font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+        font-family: "Ubuntu Mono", "IBM Plex Mono", monospace;
         background: radial-gradient(circle at top right,rgba(84,54,252,.12),transparent 22%),
                     linear-gradient(180deg,#0f0f16 0%,var(--bg) 100%);
         color: var(--ink);
