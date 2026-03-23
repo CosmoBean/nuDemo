@@ -763,9 +763,9 @@ def build_browser_home_html() -> str:
       <section class="arch-panel">
         <p class="arch-subtitle">
           nuScenes samples flow through an extraction pipeline directly into the
-          <strong>swappable storage layer</strong> (hot path). Kafka sits alongside as an
-          <strong>async metadata bus</strong> — useful for fan-out and replay, but not in the
-          full-payload write path where its consumer throughput is the bottleneck.
+          <strong>swappable storage layer</strong> (hot path). During ingestion, a metadata-only
+          Kafka topic <strong>warms Redis asynchronously</strong> — keeping the cache current without
+          touching the blob path. Redis failure recovery rebuilds from PostgreSQL, not Kafka logs.
         </p>
         <div class="arch-flow">
 
@@ -811,30 +811,34 @@ def build_browser_home_html() -> str:
           </div>
 
           <div class="flow-arrow--async">
-            <span>&#8597;</span>
-            <span class="async-label">async</span>
+            <span>&#8594;</span>
+            <span class="async-label">warmup</span>
           </div>
 
           <div class="arch-node--kafka">
-            <div class="node-tag" style="color:#f2cc0c88">Ingestion Bus</div>
+            <div class="node-tag" style="color:#f2cc0c88">Async Warmup</div>
             <div class="node-name" style="font-size:.92rem">Kafka</div>
             <div class="node-detail" style="color:#b5a070">
               metadata-only topic<br>
               ~20 msg/s produce<br>
-              ~3 msg/s consume<br>
-              fan-out &amp; replay
+              feeds Redis on ingest<br>
+              replay &amp; fan-out
             </div>
           </div>
 
         </div>
         <div class="perf-note">
-          <strong>Why Kafka is not in the hot write path:</strong>
-          measured full-payload consumer throughput is <span class="perf-warn">~3.4 msg/s (2.6 MB/s)</span>
-          vs <span class="perf-good">35–37 samples/s</span> for direct writes to Lance/Parquet/WebDataset.
-          The produce side is fast (17.5 msg/s, 13.4 MB/s) but the consumer bottlenecks the pipeline.
-          Kafka is valuable for the <strong>metadata-only topic</strong> (3.9 KB/msg, 20 msg/s produce)
-          to keep Redis warm asynchronously, and for <strong>replay</strong> — re-ingesting into a new
-          backend from the retained topic without re-running extraction.
+          <strong>Kafka → Redis: warmup only, not recovery.</strong>
+          During active ingestion, metadata messages (~3.9 KB each) flow from Extraction → Kafka refined topic → Redis
+          so the cache is warm before the blob write finishes.
+          <strong>Redis failure recovery goes directly back to PostgreSQL</strong> — metadata is already durable there,
+          and a full cache rebuild takes seconds at ~142 MB.
+          Using Kafka as a Redis WAL would be overkill: it adds broker dependency and consumer offset management
+          for a problem that a simple <code>HSET</code> replay from PostgreSQL already solves.
+          &nbsp;&nbsp;|&nbsp;&nbsp;
+          <strong>Why Kafka is not in the blob write path:</strong>
+          measured full-payload consume is <span class="perf-warn">~3.4 msg/s</span>
+          vs <span class="perf-good">35–37 samples/s</span> direct to Lance/Parquet/WebDataset.
         </div>
       </section>
 
