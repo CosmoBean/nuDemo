@@ -560,9 +560,103 @@ def build_browser_home_html() -> str:
         color: var(--ink);
         font-weight: 800;
       }
+      .arch-panel {
+        background: var(--panel);
+        border: 3px solid var(--line);
+        border-radius: 22px;
+        padding: 28px 28px 24px;
+        box-shadow: var(--shadow);
+      }
+      .arch-subtitle {
+        font-size: 0.88rem;
+        color: var(--muted);
+        line-height: 1.6;
+        margin: 0 0 24px;
+      }
+      .arch-subtitle strong { color: var(--ink); }
+      .arch-flow {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        overflow-x: auto;
+        padding-bottom: 4px;
+      }
+      .flow-arrow {
+        font-size: 1.5rem;
+        color: var(--accent);
+        padding: 18px 2px 0;
+        flex-shrink: 0;
+        line-height: 1;
+      }
+      .arch-node {
+        border: 2px solid var(--line);
+        border-radius: 14px;
+        padding: 14px 16px;
+        background: var(--accent-soft);
+        min-width: 148px;
+        flex-shrink: 0;
+      }
+      .arch-node--storage {
+        border-color: var(--accent);
+        border-width: 3px;
+      }
+      .arch-node--cache {
+        border: 2px dashed var(--line);
+        border-radius: 12px;
+        padding: 10px 14px;
+        margin-top: 10px;
+        background: #0f0e1a;
+      }
+      .node-tag {
+        font-size: 0.66rem;
+        text-transform: uppercase;
+        letter-spacing: .1em;
+        color: var(--muted);
+        margin-bottom: 5px;
+      }
+      .node-name {
+        font-size: 1rem;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+      .node-detail {
+        font-size: 0.76rem;
+        color: var(--muted);
+        line-height: 1.75;
+      }
+      .swap-badge {
+        display: inline-block;
+        background: var(--accent);
+        color: var(--ink);
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: .04em;
+        padding: 2px 10px;
+        border-radius: 999px;
+      }
+      .backend-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-top: 8px;
+      }
+      .backend-item {
+        font-size: 0.76rem;
+        padding: 4px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: #12101e;
+      }
+      .cache-divider {
+        border: none;
+        border-top: 1px dashed var(--line);
+        margin: 10px 0 0;
+      }
       @media (max-width: 860px) {
         .hero-inner { grid-template-columns: 1fr; }
         .link-row { align-items: flex-start; flex-direction: column; }
+        .arch-flow { flex-direction: column; gap: 4px; }
+        .flow-arrow { padding: 2px 0; transform: rotate(90deg); }
       }
     </style>
   </head>
@@ -626,6 +720,62 @@ def build_browser_home_html() -> str:
           <a href="/grafana-dashboard">Open observability</a>
         </section>
       </div>
+
+      <div class="section-title">Architecture</div>
+      <section class="arch-panel">
+        <p class="arch-subtitle">
+          nuScenes samples flow through an extraction pipeline into a
+          <strong>swappable storage layer</strong>. Each backend exposes the same read interface —
+          training, evaluation, and curation workloads see identical results regardless of which
+          backend is active. Redis sits alongside as a metadata index and embedding cache, not a
+          replacement for full-fidelity blob storage.
+        </p>
+        <div class="arch-flow">
+
+          <div class="arch-node">
+            <div class="node-tag">Source</div>
+            <div class="node-name">nuScenes</div>
+            <div class="node-detail">v1.0-trainval<br>850 scenes<br>34,149 samples<br>6 cameras · LiDAR · 5 radars</div>
+          </div>
+
+          <div class="flow-arrow">&#8594;</div>
+
+          <div class="arch-node">
+            <div class="node-tag">Pipeline</div>
+            <div class="node-name">Extraction</div>
+            <div class="node-detail">JPEG encode<br>numpy arrays<br>annotation parse<br>scene walk</div>
+          </div>
+
+          <div class="flow-arrow">&#8594;</div>
+
+          <div class="arch-node arch-node--storage">
+            <div class="node-tag">Storage Layer</div>
+            <div class="node-name"><span class="swap-badge">&#8644;&nbsp;Swappable</span></div>
+            <div class="backend-list">
+              <div class="backend-item">MinIO + PostgreSQL</div>
+              <div class="backend-item">Lance</div>
+              <div class="backend-item">Parquet</div>
+              <div class="backend-item">WebDataset</div>
+            </div>
+            <hr class="cache-divider">
+            <div class="arch-node--cache">
+              <div class="node-tag">Cache Layer</div>
+              <div class="node-name" style="font-size:.92rem">Redis</div>
+              <div class="node-detail">metadata index<br>embedding vectors<br>hot-path serving</div>
+            </div>
+          </div>
+
+          <div class="flow-arrow">&#8594;</div>
+
+          <div class="arch-node">
+            <div class="node-tag">Consumers</div>
+            <div class="node-name">Workloads</div>
+            <div class="node-detail">sequential training<br>random evaluation<br>curation query<br>explorer UI</div>
+          </div>
+
+        </div>
+      </section>
+
     </main>
   </body>
 </html>
