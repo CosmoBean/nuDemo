@@ -652,6 +652,44 @@ def build_browser_home_html() -> str:
         border-top: 1px dashed var(--line);
         margin: 10px 0 0;
       }
+      .arch-node--kafka {
+        border: 2px dashed #f2cc0c55;
+        border-radius: 14px;
+        padding: 12px 14px;
+        background: #16140a;
+        flex-shrink: 0;
+        min-width: 148px;
+      }
+      .flow-arrow--async {
+        font-size: 1.2rem;
+        color: #f2cc0c88;
+        padding: 18px 2px 0;
+        flex-shrink: 0;
+        line-height: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+      }
+      .flow-arrow--async .async-label {
+        font-size: 0.6rem;
+        color: #f2cc0c88;
+        letter-spacing: .05em;
+        text-transform: uppercase;
+      }
+      .perf-note {
+        margin-top: 16px;
+        padding: 12px 16px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #0f0e1a;
+        font-size: 0.78rem;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .perf-note strong { color: var(--ink); }
+      .perf-note .perf-good { color: #73BF69; }
+      .perf-note .perf-warn { color: #f2cc0c; }
       @media (max-width: 860px) {
         .hero-inner { grid-template-columns: 1fr; }
         .link-row { align-items: flex-start; flex-direction: column; }
@@ -724,11 +762,10 @@ def build_browser_home_html() -> str:
       <div class="section-title">Architecture</div>
       <section class="arch-panel">
         <p class="arch-subtitle">
-          nuScenes samples flow through an extraction pipeline into a
-          <strong>swappable storage layer</strong>. Each backend exposes the same read interface —
-          training, evaluation, and curation workloads see identical results regardless of which
-          backend is active. Redis sits alongside as a metadata index and embedding cache, not a
-          replacement for full-fidelity blob storage.
+          nuScenes samples flow through an extraction pipeline directly into the
+          <strong>swappable storage layer</strong> (hot path). Kafka sits alongside as an
+          <strong>async metadata bus</strong> — useful for fan-out and replay, but not in the
+          full-payload write path where its consumer throughput is the bottleneck.
         </p>
         <div class="arch-flow">
 
@@ -749,7 +786,7 @@ def build_browser_home_html() -> str:
           <div class="flow-arrow">&#8594;</div>
 
           <div class="arch-node arch-node--storage">
-            <div class="node-tag">Storage Layer</div>
+            <div class="node-tag">Storage Layer &mdash; hot path</div>
             <div class="node-name"><span class="swap-badge">&#8644;&nbsp;Swappable</span></div>
             <div class="backend-list">
               <div class="backend-item">MinIO + PostgreSQL</div>
@@ -773,6 +810,31 @@ def build_browser_home_html() -> str:
             <div class="node-detail">sequential training<br>random evaluation<br>curation query<br>explorer UI</div>
           </div>
 
+          <div class="flow-arrow--async">
+            <span>&#8597;</span>
+            <span class="async-label">async</span>
+          </div>
+
+          <div class="arch-node--kafka">
+            <div class="node-tag" style="color:#f2cc0c88">Ingestion Bus</div>
+            <div class="node-name" style="font-size:.92rem">Kafka</div>
+            <div class="node-detail" style="color:#b5a070">
+              metadata-only topic<br>
+              ~20 msg/s produce<br>
+              ~3 msg/s consume<br>
+              fan-out &amp; replay
+            </div>
+          </div>
+
+        </div>
+        <div class="perf-note">
+          <strong>Why Kafka is not in the hot write path:</strong>
+          measured full-payload consumer throughput is <span class="perf-warn">~3.4 msg/s (2.6 MB/s)</span>
+          vs <span class="perf-good">35–37 samples/s</span> for direct writes to Lance/Parquet/WebDataset.
+          The produce side is fast (17.5 msg/s, 13.4 MB/s) but the consumer bottlenecks the pipeline.
+          Kafka is valuable for the <strong>metadata-only topic</strong> (3.9 KB/msg, 20 msg/s produce)
+          to keep Redis warm asynchronously, and for <strong>replay</strong> — re-ingesting into a new
+          backend from the retained topic without re-running extraction.
         </div>
       </section>
 
