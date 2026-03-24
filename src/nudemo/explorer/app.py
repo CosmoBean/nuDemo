@@ -704,28 +704,25 @@ def build_browser_home_html() -> str:
         <div class="hero-inner">
           <div>
             <div class="pill">Ingested data browser</div>
-            <h1>Browse ingested samples, compare storage backends, and inspect pipeline telemetry.</h1>
-            <p>
-              Search the nuScenes dataset after ingestion, compare backend performance, and view
-              observability data from a single browser.
-            </p>
+            <h1>nuScenes storage backend benchmark.</h1>
+            <p>Compare five backends across ingest speed, scan throughput, latency, and disk use.</p>
           </div>
           <div class="links">
             <div class="link-row">
-              <span>Compare all storage backends side-by-side</span>
-              <a href="/compare">Open comparison</a>
+              <span>Backend comparison</span>
+              <a href="/compare">Open</a>
             </div>
             <div class="link-row">
-              <span>Search and preview ingested samples</span>
-              <a href="/explorer">Open explorer</a>
+              <span>Sample explorer</span>
+              <a href="/explorer">Open</a>
             </div>
             <div class="link-row">
-              <span>Scene player with 3D LiDAR rendering</span>
-              <a href="/scene-studio">Open scene studio</a>
+              <span>Scene studio</span>
+              <a href="/scene-studio">Open</a>
             </div>
             <div class="link-row">
-              <span>Telemetry, service pressure, and bottlenecks in Grafana</span>
-              <a href="/grafana-dashboard">Open Grafana</a>
+              <span>Grafana observability</span>
+              <a href="/grafana-dashboard">Open</a>
             </div>
           </div>
         </div>
@@ -735,27 +732,23 @@ def build_browser_home_html() -> str:
       <div class="card-grid">
         <section class="card">
           <strong>Backend Comparison</strong>
-          Compare write throughput, sequential scan, random access latency, curation speed, and disk
-          footprint across all four blob storage backends with ranked charts and a full metrics table.
-          <a href="/compare">Open comparison</a>
+          Ranked charts and metrics table across all storage backends.
+          <a href="/compare">Open</a>
         </section>
         <section class="card">
           <strong>Explorer</strong>
-          Search by token, scene, location, or annotation category. Inspect processed camera images
-          and preview LiDAR geometry for each sample.
-          <a href="/explorer">Go to explorer</a>
+          Search samples by scene, location, token, or category.
+          <a href="/explorer">Open</a>
         </section>
         <section class="card">
           <strong>Scene Studio</strong>
-          Focus on one scene at a time with a scrubber, live sample switching, and a 3D LiDAR
-          point-cloud viewer driven by the stored nuScenes payloads.
-          <a href="/scene-studio">Open studio</a>
+          Step through a scene with a 3D LiDAR point-cloud viewer.
+          <a href="/scene-studio">Open</a>
         </section>
         <section class="card">
-          <strong>Grafana Observability</strong>
-          Review stage bottlenecks, service peaks, storage throughput, and fetch latency from the
-          latest persisted telemetry without leaving the browser.
-          <a href="/grafana-dashboard">Open observability</a>
+          <strong>Grafana</strong>
+          Stage bottlenecks, service pressure, and fetch latency.
+          <a href="/grafana-dashboard">Open</a>
         </section>
       </div>
 
