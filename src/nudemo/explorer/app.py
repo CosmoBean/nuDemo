@@ -2091,8 +2091,8 @@ def build_scene_studio_html() -> str:
             <label for="max_points">3D point budget</label>
             <select id="max_points">
               <option value="8000">8,000</option>
-              <option value="16000" selected>16,000</option>
-              <option value="32000">32,000</option>
+              <option value="16000">16,000</option>
+              <option value="32000" selected>32,000</option>
             </select>
           </div>
           <div class="field">
@@ -2175,7 +2175,7 @@ def build_scene_studio_html() -> str:
       const state = {
         sceneToken: params.get("scene_token") || "",
         sampleIdx: params.get("sample_idx") ? Number(params.get("sample_idx")) : null,
-        maxPoints: Number(params.get("max_points") || 16000),
+        maxPoints: Number(params.get("max_points") || 32000),
         processedMode: params.get("processed_mode") || "edges",
         currentScene: null,
         currentSample: null,
@@ -2488,7 +2488,7 @@ def build_scene_studio_html() -> str:
       });
 
       el.maxPoints.addEventListener("change", async () => {
-        state.maxPoints = Number(el.maxPoints.value || 16000);
+        state.maxPoints = Number(el.maxPoints.value || 32000);
         if (state.sampleIdx !== null) {
           await loadSample(state.sampleIdx, { skipSceneReload: true });
         }
