@@ -2126,20 +2126,6 @@ def build_scene_studio_html() -> str:
             <canvas id="lidar_canvas"></canvas>
           </section>
 
-          <div class="studio-grid">
-            <section class="panel timeline-panel">
-              <h2 style="margin-top:0;">Scene timeline</h2>
-              <div id="scene_timeline" class="timeline-strip"></div>
-            </section>
-
-            <aside class="panel inspector">
-              <h2 style="margin-top:0;">Sample inspector</h2>
-              <div id="sample_inspector" class="inspector-grid">
-                <p>Select a scene sample to inspect its metadata and annotations.</p>
-              </div>
-            </aside>
-          </div>
-
           <section class="panel camera-panel">
             <h2 style="margin-top:0;">Front camera compare</h2>
             <div id="camera_compare" class="camera-grid">
@@ -2155,6 +2141,20 @@ def build_scene_studio_html() -> str:
               </div>
             </div>
           </section>
+
+          <div class="studio-grid">
+            <section class="panel timeline-panel">
+              <h2 style="margin-top:0;">Scene timeline</h2>
+              <div id="scene_timeline" class="timeline-strip"></div>
+            </section>
+
+            <aside class="panel inspector">
+              <h2 style="margin-top:0;">Sample inspector</h2>
+              <div id="sample_inspector" class="inspector-grid">
+                <p>Select a scene sample to inspect its metadata and annotations.</p>
+              </div>
+            </aside>
+          </div>
         </section>
       </div>
     </main>
