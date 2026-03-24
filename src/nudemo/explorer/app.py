@@ -2846,7 +2846,7 @@ def build_compare_html() -> str:
       }
       .metrics-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 16px; margin-bottom: 32px;
       }
       .metric-card {
@@ -2904,6 +2904,12 @@ def build_compare_html() -> str:
       .redis-metric { border: 1px solid var(--line); border-radius: 10px; padding: 10px 16px; background: var(--accent-soft); }
       .redis-metric .rm-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
       .redis-metric .rm-value { font-size: 1.1rem; font-weight: 700; }
+      @media (max-width: 1180px) {
+        .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      @media (max-width: 760px) {
+        .metrics-grid { grid-template-columns: 1fr; }
+      }
     </style>
   </head>
   <body>
