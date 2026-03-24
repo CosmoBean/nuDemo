@@ -12,7 +12,6 @@ from fastapi.staticfiles import StaticFiles
 
 from nudemo.benchmarks.export import load_latest_comparison_report
 from nudemo.config import AppConfig
-from nudemo.storage.elasticsearch_store import ElasticsearchBackend
 from nudemo.explorer.media import (
     lidar_payload_to_point_cloud,
     lidar_payload_to_svg,
@@ -25,6 +24,7 @@ from nudemo.reporting.dashboard import (
     build_recommendation_summary,
     build_storage_format_rows,
 )
+from nudemo.storage.elasticsearch_store import ElasticsearchBackend
 
 CAMERA_COLUMN_MAP = {
     "CAM_FRONT": "cam_front_path",
@@ -246,6 +246,76 @@ class ExplorerStore:
             "offset": effective_offset,
             "items": items,
         }
+
+    def fetch_samples_by_ids(self, sample_ids: list[int]) -> list[dict[str, Any]]:
+        if not sample_ids:
+            return []
+
+        with self._connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                WITH requested AS (
+                    SELECT sample_idx, ord
+                    FROM unnest(%s::int[]) WITH ORDINALITY AS ids(sample_idx, ord)
+                )
+                SELECT
+                    s.sample_idx,
+                    s.token,
+                    s.scene_token,
+                    COALESCE(sc.scene_name, s.scene_token) AS scene_name,
+                    s.timestamp,
+                    s.location,
+                    s.num_annotations,
+                    s.num_lidar_points,
+                    s.cam_front_path,
+                    ARRAY_REMOVE(
+                        ARRAY_AGG(DISTINCT a.category ORDER BY a.category),
+                        NULL
+                    ) AS annotation_categories,
+                    requested.ord
+                FROM requested
+                JOIN samples s ON s.sample_idx = requested.sample_idx
+                LEFT JOIN scenes sc ON sc.scene_token = s.scene_token
+                LEFT JOIN annotations a ON a.sample_idx = s.sample_idx
+                GROUP BY
+                    s.sample_idx,
+                    s.token,
+                    s.scene_token,
+                    sc.scene_name,
+                    s.timestamp,
+                    s.location,
+                    s.num_annotations,
+                    s.num_lidar_points,
+                    s.cam_front_path,
+                    requested.ord
+                ORDER BY requested.ord
+                """,
+                (sample_ids,),
+            )
+            rows = [dict(row) for row in cursor.fetchall()]
+
+        items = []
+        for row in rows:
+            categories = row.get("annotation_categories") or []
+            items.append(
+                {
+                    "sample_idx": row["sample_idx"],
+                    "token": row["token"],
+                    "scene_token": row["scene_token"],
+                    "scene_name": row["scene_name"],
+                    "timestamp": row["timestamp"],
+                    "location": row["location"],
+                    "num_annotations": row["num_annotations"],
+                    "num_lidar_points": row["num_lidar_points"],
+                    "annotation_categories": categories,
+                    "preview_url": (
+                        f"/api/samples/{row['sample_idx']}/cameras/CAM_FRONT"
+                        if row.get("cam_front_path")
+                        else None
+                    ),
+                }
+            )
+        return items
 
     def fetch_sample_detail(self, sample_idx: int) -> dict[str, Any] | None:
         column_names = (*CAMERA_COLUMN_MAP.values(), *SENSOR_COLUMN_MAP.values())
@@ -1541,7 +1611,11 @@ def build_explorer_html() -> str:
           <div id="notice" class="notice" hidden></div>
           <div class="field">
             <label for="q">Search</label>
-            <input id="q" type="search" placeholder="token, scene, location, or category">
+            <input id="q" type="search" placeholder="scene-0001, token prefix, vehicle.car, singapore">
+            <div style="font-size:.75rem;color:var(--muted);margin-top:4px;line-height:1.5">
+              Search scenes, scene tokens, sample tokens, locations, and annotation categories from one field.<br>
+              Examples: <code>scene-0001</code>, <code>73030fb67d3c</code>, <code>vehicle.car</code>, <code>singapore</code>
+            </div>
           </div>
           <div class="field">
             <label for="scene">Scene</label>
@@ -1579,28 +1653,10 @@ def build_explorer_html() -> str:
           <h2 style="margin-top: 24px;">Top categories</h2>
           <ul id="top_categories" class="list"></ul>
 
-          <h2 style="margin-top: 24px;">Annotation Search <span class="es-badge">ES</span></h2>
-          <div class="es-input-row">
-            <input id="es_q" type="search" placeholder="e.g. vehicle, pedestrian...">
-            <button id="es_go">Search</button>
-          </div>
-          <div id="es_status" class="es-status-line"></div>
-          <div id="es_facets" class="es-facets"></div>
         </aside>
 
         <section class="content">
           <div id="summary" class="summary-grid"></div>
-
-          <div id="es-results-section" style="display:none">
-            <div class="es-results-head">
-              <div>
-                <h2 style="margin-bottom:4px">Annotation search <span class="es-badge">ES</span></h2>
-                <span id="es_total_meta" style="font-size:.88rem;color:var(--muted)"></span>
-              </div>
-              <button id="es_close" class="secondary">Clear</button>
-            </div>
-            <div id="es_hits" class="results-grid"></div>
-          </div>
 
           <div class="results-head">
             <div>
@@ -1959,120 +2015,6 @@ def build_explorer_html() -> str:
           showNotice(error.message);
         }
       })();
-
-      // ── Elasticsearch annotation search ─────────────────────────────────
-      const esQ       = document.getElementById("es_q");
-      const esGo      = document.getElementById("es_go");
-      const esClose   = document.getElementById("es_close");
-      const esStatus  = document.getElementById("es_status");
-      const esFacets  = document.getElementById("es_facets");
-      const esSection = document.getElementById("es-results-section");
-      const esHits    = document.getElementById("es_hits");
-      const esTotalMeta = document.getElementById("es_total_meta");
-
-      async function runEsSearch() {
-        const q = esQ.value.trim();
-        if (!q) return;
-        esStatus.textContent = "Searching...";
-        esStatus.className = "es-status-line";
-        esSection.style.display = "none";
-        try {
-          const res = await fetch(`/api/es-search?q=${encodeURIComponent(q)}&size=24`);
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            esStatus.textContent = err.detail || `Error ${res.status}`;
-            esStatus.className = "es-status-line error";
-            return;
-          }
-          const data = await res.json();
-          esStatus.textContent = "";
-
-          const sceneCount = (data.aggs && data.aggs.scenes && data.aggs.scenes.length) || 0;
-          esTotalMeta.textContent = `${data.total.toLocaleString()} samples across ${sceneCount} scenes`;
-
-          // Scene cards at top
-          const scenes = (data.aggs && data.aggs.scenes) || [];
-          const sceneHtml = scenes.length ? `
-            <div style="margin-bottom:16px">
-              <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:8px">Matching scenes</div>
-              <div class="es-facets">
-                ${scenes.map(s => `
-                  <button class="es-facet-btn es-scene-btn" onclick="esOpenScene(${JSON.stringify(s.scene_token)}, ${JSON.stringify(s.scene_name)})">
-                    ${escapeHtml(s.scene_name)}
-                    <span class="es-count">${s.sample_count} samples</span>
-                    <span style="color:#6b59dd;margin-left:4px;font-size:.65rem">${escapeHtml(s.location)}</span>
-                  </button>`).join("")}
-              </div>
-            </div>` : "";
-
-          esHits.innerHTML = sceneHtml + (data.hits.length
-            ? data.hits.map(h => `
-              <div class="card sample-card es-hit" onclick="loadDetail(${h.sample_idx})">
-                <img loading="lazy" src="/api/samples/${h.sample_idx}/cameras/CAM_FRONT" alt="sample ${h.sample_idx}">
-                <div class="body">
-                  <div class="es-score">score ${h.score.toFixed(2)}</div>
-                  <h3>#${h.sample_idx} &middot; ${escapeHtml(h.scene_name)}</h3>
-                  <div style="font-size:.82rem;color:var(--muted)">${escapeHtml(h.location)} &middot; ${h.num_annotations} annotations</div>
-                  <div class="es-cats">${h.categories.slice(0, 4).map(c => `<span class="es-cat">${escapeHtml(c)}</span>`).join("")}</div>
-                </div>
-              </div>`).join("")
-            : `<p style="color:var(--muted)">No results for "${escapeHtml(q)}".</p>`);
-
-          const cats = (data.aggs && data.aggs.categories) || [];
-          esFacets.innerHTML = cats.length
-            ? cats.map(c =>
-                `<button class="es-facet-btn" onclick="esSetQ(${JSON.stringify(c.category)})">${escapeHtml(c.category)}<span class="es-count">${c.count}</span></button>`
-              ).join("")
-            : "";
-
-          esSection.style.display = "";
-        } catch (e) {
-          esStatus.textContent = "Elasticsearch unavailable — run: make infra-up";
-          esStatus.className = "es-status-line unavailable";
-        }
-      }
-
-      function escapeHtml(s) {
-        return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-      }
-
-      function esSetQ(term) {
-        esQ.value = term;
-        runEsSearch();
-      }
-
-      function esOpenScene(sceneToken, sceneName) {
-        window.open(`/scene-studio?scene_token=${encodeURIComponent(sceneToken)}`, "_blank");
-      }
-
-      esGo.addEventListener("click", runEsSearch);
-      esQ.addEventListener("keydown", e => { if (e.key === "Enter") runEsSearch(); });
-      esClose.addEventListener("click", () => {
-        esSection.style.display = "none";
-        esFacets.innerHTML = "";
-        esQ.value = "";
-        esStatus.textContent = "";
-      });
-
-      // Check ES availability on load
-      fetch("/api/es-status").then(r => r.json()).then(data => {
-        if (!data.available) {
-          esStatus.textContent = "Elasticsearch not running";
-          esStatus.className = "es-status-line unavailable";
-          esGo.disabled = true;
-          esQ.disabled = true;
-          esQ.placeholder = "Start ES to enable annotation search";
-        } else if (data.doc_count === 0) {
-          esStatus.textContent = `Connected · no documents — run: nudemo es-index`;
-          esStatus.className = "es-status-line";
-        } else {
-          esStatus.textContent = `${data.doc_count.toLocaleString()} samples indexed`;
-          esStatus.className = "es-status-line";
-        }
-      }).catch(() => {
-        esStatus.textContent = "ES status unknown";
-        esStatus.className = "es-status-line unavailable";
-      });
     </script>
   </body>
 </html>
@@ -3256,7 +3198,9 @@ def create_app(
     @app.get("/api/es-search")
     def api_es_search(
         q: str = "",
+        scene_token: str = "",
         location: str = "",
+        category: str = "",
         min_annotations: int = Query(default=0, ge=0),
         size: int = Query(default=20, ge=1, le=100),
         from_: int = Query(default=0, alias="from", ge=0),
@@ -3268,7 +3212,15 @@ def create_app(
                 "Run: make infra-up",
             )
         try:
-            return es_store.search(q=q, location=location, min_annotations=min_annotations, size=size, from_=from_)
+            return es_store.search(
+                q=q,
+                scene_token=scene_token,
+                location=location,
+                category=category,
+                min_annotations=min_annotations,
+                size=size,
+                from_=from_,
+            )
         except Exception as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -3283,8 +3235,26 @@ def create_app(
         offset: int = Query(default=0, ge=0),
     ) -> dict[str, Any]:
         try:
+            normalized_q = (q or "").strip()
+            if normalized_q and es_store.is_available():
+                es_payload = es_store.search(
+                    q=normalized_q,
+                    scene_token=scene_token or "",
+                    location=location or "",
+                    category=category or "",
+                    min_annotations=min_annotations,
+                    size=limit,
+                    from_=offset,
+                )
+                sample_ids = [int(hit["sample_idx"]) for hit in es_payload.get("hits", [])]
+                return {
+                    "total": int(es_payload.get("total", 0)),
+                    "limit": limit,
+                    "offset": offset,
+                    "items": store.fetch_samples_by_ids(sample_ids),
+                }
             return store.search_samples(
-                q=q,
+                q=normalized_q or None,
                 scene_token=scene_token,
                 location=location,
                 category=category,

@@ -5,7 +5,6 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-
 _INDEX_MAPPING: dict = {
     "mappings": {
         "properties": {
@@ -32,6 +31,10 @@ _INDEX_MAPPING: dict = {
         }
     }
 }
+
+
+def _escape_wildcard_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
 
 
 @dataclass(slots=True)
@@ -174,14 +177,22 @@ class ElasticsearchBackend:
                             for a in anns
                         ],
                     }
-                    batch.append(json.dumps({"index": {"_index": self.index, "_id": str(row["sample_idx"])}}))
+                    batch.append(
+                        json.dumps(
+                            {"index": {"_index": self.index, "_id": str(row["sample_idx"])}}
+                        )
+                    )
                     batch.append(json.dumps(doc))
 
                     if len(batch) >= batch_size * 2:
                         ndjson_body = "\n".join(batch) + "\n"
                         result = self._req("POST", "/_bulk", ndjson_body, ndjson=True)
                         if result.get("errors"):
-                            errors = sum(1 for item in result.get("items", []) if "error" in item.get("index", {}))
+                            errors = sum(
+                                1
+                                for item in result.get("items", [])
+                                if "error" in item.get("index", {})
+                            )
                             if errors:
                                 raise RuntimeError(f"{errors} bulk index errors")
                         total += len(batch) // 2
@@ -217,43 +228,121 @@ class ElasticsearchBackend:
     def search(
         self,
         q: str = "",
+        scene_token: str = "",
         location: str = "",
+        category: str = "",
         min_annotations: int = 0,
         size: int = 20,
         from_: int = 0,
     ) -> dict:
+        normalized_q = q.strip()
         must: list = []
         filter_: list = []
 
-        if q:
-            must.append({
-                "bool": {
-                    "should": [
-                        {"term":     {"scene_name": q}},
-                        {"term":     {"token": q}},
-                        {"wildcard": {"location": {"value": f"*{q}*", "case_insensitive": True}}},
-                        {
-                            "nested": {
-                                "path": "annotations",
-                                "score_mode": "max",
-                                "query": {
-                                    "bool": {
-                                        "should": [
-                                            {"wildcard": {"annotations.category":      {"value": f"*{q}*", "case_insensitive": True}}},
-                                            {"wildcard": {"annotations.category_group": {"value": f"*{q}*", "case_insensitive": True}}},
-                                            {"match":    {"annotations.category_text":  {"query": q, "fuzziness": "AUTO"}}},
-                                        ]
-                                    }
-                                },
+        if normalized_q:
+            wildcard_q = _escape_wildcard_value(normalized_q)
+            should: list[dict] = [
+                {"term": {"scene_name": {"value": normalized_q, "boost": 8.0}}},
+                {
+                    "wildcard": {
+                        "scene_name": {
+                            "value": f"*{wildcard_q}*",
+                            "case_insensitive": True,
+                            "boost": 4.0,
+                        }
+                    }
+                },
+                {"term": {"token": {"value": normalized_q, "boost": 12.0}}},
+                {"term": {"scene_token": {"value": normalized_q, "boost": 12.0}}},
+                {
+                    "wildcard": {
+                        "location": {
+                            "value": f"*{wildcard_q}*",
+                            "case_insensitive": True,
+                            "boost": 2.0,
+                        }
+                    }
+                },
+                {
+                    "nested": {
+                        "path": "annotations",
+                        "score_mode": "max",
+                        "query": {
+                            "bool": {
+                                "should": [
+                                    {
+                                        "wildcard": {
+                                            "annotations.category": {
+                                                "value": f"*{wildcard_q}*",
+                                                "case_insensitive": True,
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "wildcard": {
+                                            "annotations.category_group": {
+                                                "value": f"*{wildcard_q}*",
+                                                "case_insensitive": True,
+                                            }
+                                        }
+                                    },
+                                    {
+                                        "match": {
+                                            "annotations.category_text": {
+                                                "query": normalized_q,
+                                                "fuzziness": "AUTO",
+                                            }
+                                        }
+                                    },
+                                ]
                             }
                         },
-                    ],
+                    }
+                },
+            ]
+            if len(normalized_q) >= 6:
+                should.extend(
+                    [
+                        {
+                            "wildcard": {
+                                "token": {
+                                    "value": f"{wildcard_q}*",
+                                    "case_insensitive": True,
+                                    "boost": 6.0,
+                                }
+                            }
+                        },
+                        {
+                            "wildcard": {
+                                "scene_token": {
+                                    "value": f"{wildcard_q}*",
+                                    "case_insensitive": True,
+                                    "boost": 6.0,
+                                }
+                            }
+                        },
+                    ]
+                )
+            must.append({
+                "bool": {
+                    "should": should,
                     "minimum_should_match": 1,
                 }
             })
 
+        if scene_token:
+            filter_.append({"term": {"scene_token": scene_token}})
         if location:
             filter_.append({"term": {"location": location}})
+        if category:
+            filter_.append(
+                {
+                    "nested": {
+                        "path": "annotations",
+                        "query": {"term": {"annotations.category": category}},
+                    }
+                }
+            )
         if min_annotations > 0:
             filter_.append({"range": {"num_annotations": {"gte": min_annotations}}})
 
@@ -267,7 +356,15 @@ class ElasticsearchBackend:
             "from": from_,
             "size": size,
             "sort": [{"_score": "desc"}, {"sample_idx": "asc"}],
-            "_source": ["sample_idx", "token", "scene_token", "scene_name", "location", "num_annotations", "annotations.category"],
+            "_source": [
+                "sample_idx",
+                "token",
+                "scene_token",
+                "scene_name",
+                "location",
+                "num_annotations",
+                "annotations.category",
+            ],
             "aggs": {
                 "top_categories": {
                     "nested": {"path": "annotations"},
@@ -325,9 +422,13 @@ class ElasticsearchBackend:
             "total": hits_raw.get("total", {}).get("value", 0),
             "hits":  hits,
             "aggs": {
-                "categories": [{"category": b["key"], "count": b["doc_count"]} for b in cat_buckets],
-                "locations":  [{"location": b["key"], "count": b["doc_count"]} for b in loc_buckets],
-                "scenes":     scenes,
+                "categories": [
+                    {"category": b["key"], "count": b["doc_count"]} for b in cat_buckets
+                ],
+                "locations": [
+                    {"location": b["key"], "count": b["doc_count"]} for b in loc_buckets
+                ],
+                "scenes": scenes,
             },
         }
 
