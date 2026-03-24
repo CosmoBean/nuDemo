@@ -567,13 +567,14 @@ def build_browser_home_html() -> str:
         padding: 28px 28px 24px;
         box-shadow: var(--shadow);
       }
-      .arch-subtitle {
-        font-size: 0.88rem;
+      .lane-label {
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: .12em;
         color: var(--muted);
-        line-height: 1.6;
-        margin: 0 0 24px;
+        margin-bottom: 8px;
+        margin-top: 4px;
       }
-      .arch-subtitle strong { color: var(--ink); }
       .arch-flow {
         display: flex;
         align-items: flex-start;
@@ -652,44 +653,51 @@ def build_browser_home_html() -> str:
         border-top: 1px dashed var(--line);
         margin: 10px 0 0;
       }
-      .arch-node--kafka {
-        border: 2px dashed #f2cc0c55;
-        border-radius: 14px;
-        padding: 12px 14px;
-        background: #16140a;
-        flex-shrink: 0;
-        min-width: 148px;
-      }
-      .flow-arrow--async {
-        font-size: 1.2rem;
-        color: #f2cc0c88;
-        padding: 18px 2px 0;
-        flex-shrink: 0;
-        line-height: 1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 2px;
-      }
-      .flow-arrow--async .async-label {
-        font-size: 0.6rem;
-        color: #f2cc0c88;
-        letter-spacing: .05em;
-        text-transform: uppercase;
-      }
-      .perf-note {
-        margin-top: 16px;
-        padding: 12px 16px;
-        border: 1px solid var(--line);
+      .obs-node {
+        border: 1px solid #3a3560;
         border-radius: 12px;
+        padding: 12px 14px;
         background: #0f0e1a;
-        font-size: 0.78rem;
-        color: var(--muted);
-        line-height: 1.6;
+        min-width: 130px;
+        flex-shrink: 0;
       }
-      .perf-note strong { color: var(--ink); }
-      .perf-note .perf-good { color: #73BF69; }
-      .perf-note .perf-warn { color: #f2cc0c; }
+      .obs-sep {
+        margin-top: 20px;
+        padding-top: 18px;
+        border-top: 1px dashed #3a3560;
+      }
+      .service-badges {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        flex-wrap: wrap;
+        margin-top: 18px;
+        padding-top: 14px;
+        border-top: 1px solid #2a2840;
+      }
+      .badge-label {
+        font-size: .66rem;
+        text-transform: uppercase;
+        letter-spacing: .1em;
+        color: var(--muted);
+        margin-right: 4px;
+      }
+      .service-badge {
+        font-size: .72rem;
+        padding: 3px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: var(--accent-soft);
+        color: var(--ink);
+      }
+      .perf-chip {
+        display: inline-flex;
+        gap: 6px;
+        font-size: .72rem;
+        color: var(--muted);
+      }
+      .perf-chip .good { color: #73BF69; font-weight: 700; }
+      .perf-chip .warn { color: #f2cc0c; font-weight: 700; }
       @media (max-width: 860px) {
         .hero-inner { grid-template-columns: 1fr; }
         .link-row { align-items: flex-start; flex-direction: column; }
@@ -754,34 +762,29 @@ def build_browser_home_html() -> str:
 
       <div class="section-title">Architecture</div>
       <section class="arch-panel">
-        <p class="arch-subtitle">
-          nuScenes samples flow through an extraction pipeline directly into the
-          <strong>swappable storage layer</strong>. During ingestion, a metadata-only Kafka topic
-          <strong>warms Redis asynchronously</strong>, keeping the cache current without touching
-          the blob path. Redis failure recovery rebuilds from PostgreSQL, not Kafka logs.
-        </p>
+
+        <div class="lane-label">Data path</div>
         <div class="arch-flow">
 
           <div class="arch-node">
-            <div class="node-tag">Source</div>
+            <div class="node-tag">01 &middot; Source</div>
             <div class="node-name">nuScenes</div>
-            <div class="node-detail">v1.0-trainval<br>850 scenes<br>34,149 samples<br>6 cameras · LiDAR · 5 radars</div>
+            <div class="node-detail">850 scenes · 34,149 samples<br>6 cameras · LiDAR · 5 radars</div>
           </div>
 
           <div class="flow-arrow">&#8594;</div>
 
           <div class="arch-node">
-            <div class="node-tag">Pipeline</div>
-            <div class="node-name">Extraction</div>
-            <div class="node-detail">JPEG encode<br>numpy arrays<br>annotation parse<br>scene walk</div>
+            <div class="node-tag">02 &middot; Extract</div>
+            <div class="node-name">Pipeline</div>
+            <div class="node-detail">JPEG · numpy · annotations</div>
           </div>
 
           <div class="flow-arrow">&#8594;</div>
 
           <div class="arch-node arch-node--storage">
-            <div class="node-tag">Storage Layer (hot path)</div>
-            <div class="node-name"><span class="swap-badge">&#8644;&nbsp;Swappable</span></div>
-            <div class="backend-list">
+            <div class="node-tag">03 &middot; Store &nbsp;<span class="swap-badge">&#8644;&nbsp;swappable</span></div>
+            <div class="backend-list" style="margin-top:8px">
               <div class="backend-item">MinIO + PostgreSQL</div>
               <div class="backend-item">Lance</div>
               <div class="backend-item">Parquet</div>
@@ -789,49 +792,69 @@ def build_browser_home_html() -> str:
             </div>
             <hr class="cache-divider">
             <div class="arch-node--cache">
-              <div class="node-tag">Cache Layer</div>
-              <div class="node-name" style="font-size:.92rem">Redis</div>
-              <div class="node-detail">metadata index<br>embedding vectors<br>hot-path serving</div>
+              <div class="node-tag">Cache &nbsp;<span style="color:#f2cc0c88;font-size:.65rem">via Kafka · async</span></div>
+              <div class="node-name" style="font-size:.88rem">Redis</div>
+              <div class="node-detail">metadata · embeddings<br><span class="perf-chip"><span class="warn">~3.4 msg/s</span> Kafka &nbsp;vs&nbsp; <span class="good">35+ s/s</span> direct</span></div>
             </div>
           </div>
 
           <div class="flow-arrow">&#8594;</div>
 
           <div class="arch-node">
-            <div class="node-tag">Consumers</div>
+            <div class="node-tag">04 &middot; Consume</div>
             <div class="node-name">Workloads</div>
-            <div class="node-detail">sequential training<br>random evaluation<br>curation query<br>explorer UI</div>
+            <div class="node-detail">train · eval · curate · UI</div>
           </div>
 
-          <div class="flow-arrow--async">
-            <span>&#8594;</span>
-            <span class="async-label">warmup</span>
-          </div>
+        </div>
 
-          <div class="arch-node--kafka">
-            <div class="node-tag" style="color:#f2cc0c88">Async Warmup</div>
-            <div class="node-name" style="font-size:.92rem">Kafka</div>
-            <div class="node-detail" style="color:#b5a070">
-              metadata-only topic<br>
-              ~20 msg/s produce<br>
-              feeds Redis on ingest<br>
-              replay &amp; fan-out
+        <div class="obs-sep">
+          <div class="lane-label">Observability path</div>
+          <div class="arch-flow">
+
+            <div class="obs-node">
+              <div class="node-tag">App metrics</div>
+              <div class="node-name" style="font-size:.88rem">:9464</div>
+              <div class="node-detail">OpenTelemetry<br>span &amp; run metrics</div>
             </div>
-          </div>
 
+            <div class="flow-arrow">&#8594;</div>
+
+            <div class="obs-node">
+              <div class="node-tag">Scrape &middot; 15 s</div>
+              <div class="node-name" style="font-size:.88rem">Prometheus</div>
+              <div class="node-detail">nudemo_* gauges<br>service pressure</div>
+            </div>
+
+            <div class="flow-arrow">&#8594;</div>
+
+            <div class="obs-node">
+              <div class="node-tag">Dashboards</div>
+              <div class="node-name" style="font-size:.88rem">Grafana</div>
+              <div class="node-detail">backend compare<br>query monitor</div>
+            </div>
+
+            <div class="flow-arrow">&#8594;</div>
+
+            <div class="obs-node">
+              <div class="node-tag">Proxy &middot; /grafana-dashboard</div>
+              <div class="node-name" style="font-size:.88rem">Browser UI</div>
+              <div class="node-detail">this app</div>
+            </div>
+
+          </div>
         </div>
-        <div class="perf-note">
-          <strong>Kafka feeds Redis on ingest, not on recovery.</strong>
-          Metadata messages (~3.9 KB each) flow from Extraction to Kafka to Redis so the cache is
-          warm before each blob write completes.
-          On Redis failure, the cache rebuilds directly from PostgreSQL (~142 MB, seconds).
-          Kafka as a WAL would add broker and offset management for a problem a simple
-          <code>HSET</code> replay already handles.
-          &nbsp;&nbsp;|&nbsp;&nbsp;
-          <strong>Kafka is not in the blob write path:</strong>
-          full-payload consume measured at <span class="perf-warn">~3.4 msg/s</span>
-          vs <span class="perf-good">35-37 samples/s</span> direct to Lance/Parquet/WebDataset.
+
+        <div class="service-badges">
+          <span class="badge-label">Docker Compose</span>
+          <span class="service-badge">Kafka</span>
+          <span class="service-badge">MinIO</span>
+          <span class="service-badge">PostgreSQL</span>
+          <span class="service-badge">Redis</span>
+          <span class="service-badge">Prometheus</span>
+          <span class="service-badge">Grafana</span>
         </div>
+
       </section>
 
     </main>
