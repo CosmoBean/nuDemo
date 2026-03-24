@@ -606,6 +606,38 @@ def command_render_sample(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_es_index(args: argparse.Namespace) -> int:
+    from nudemo.storage.elasticsearch_store import ElasticsearchBackend
+
+    config = AppConfig.load(args.config)
+    es = ElasticsearchBackend(url=config.services.elasticsearch.url)
+
+    if not es.is_available():
+        print(f"ERROR: Elasticsearch not reachable at {config.services.elasticsearch.url}")
+        print("Start it with: make infra-up  (or docker compose -f config/docker-compose.yml up -d elasticsearch)")
+        return 1
+
+    print(f"Resetting index '{es.index}'...")
+    es.clear()
+
+    batch: list[tuple] = []
+    total = 0
+    batch_size = args.batch_size
+
+    for idx, sample in enumerate(_iter_samples(config, args.provider, args.limit, args.scene_limit)):
+        batch.append((sample, idx))
+        if len(batch) >= batch_size:
+            total += es.bulk_index(batch)
+            batch = []
+            print(f"  indexed {total} samples...", end="\r", flush=True)
+
+    if batch:
+        total += es.bulk_index(batch)
+
+    print(f"Done: {total} samples indexed into '{es.index}' at {config.services.elasticsearch.url}")
+    return 0
+
+
 def command_render_scene(args: argparse.Namespace) -> int:
     config = AppConfig.load(args.config)
     output_path = Path(args.output) if args.output else None
@@ -715,6 +747,13 @@ def build_parser() -> argparse.ArgumentParser:
     render_scene.add_argument("--fps", type=int, default=2)
     render_scene.add_argument("--output", default=None)
     render_scene.set_defaults(func=command_render_scene)
+
+    es_index = subparsers.add_parser("es-index", help="Bulk-index annotation data into Elasticsearch")
+    es_index.add_argument("--provider", default="real", choices=["auto", "real", "synthetic"])
+    es_index.add_argument("--limit", type=int, default=None)
+    es_index.add_argument("--scene-limit", type=int, default=None)
+    es_index.add_argument("--batch-size", type=int, default=200)
+    es_index.set_defaults(func=command_es_index)
 
     telemetry = subparsers.add_parser("telemetry")
     telemetry_sub = telemetry.add_subparsers(dest="telemetry_command", required=True)

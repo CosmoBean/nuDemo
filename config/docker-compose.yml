@@ -48,6 +48,17 @@ services:
       - "127.0.0.1:6379:6379"
     command: redis-server --protected-mode yes --requirepass nudemo_redis_local
 
+  elasticsearch:
+    image: elasticsearch:8.18.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+
   prometheus:
     image: prom/prometheus:v3.5.0
     command:
@@ -89,3 +100,4 @@ services:
 volumes:
   prometheus-data:
   grafana-data:
+  es-data:

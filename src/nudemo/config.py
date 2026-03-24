@@ -101,11 +101,17 @@ class WebDatasetSettings:
 
 
 @dataclass(slots=True)
+class ElasticsearchSettings:
+    url: str
+
+
+@dataclass(slots=True)
 class ServiceSettings:
     kafka: KafkaSettings
     minio: MinioSettings
     postgres: PostgresSettings
     redis: RedisSettings
+    elasticsearch: ElasticsearchSettings
 
 
 @dataclass(slots=True)
@@ -172,6 +178,7 @@ class AppConfig:
             minio=MinioSettings(**services_raw["minio"]),
             postgres=PostgresSettings(**services_raw["postgres"]),
             redis=RedisSettings(**services_raw["redis"]),
+            elasticsearch=ElasticsearchSettings(**services_raw["elasticsearch"]),
         )
         storage_raw = raw["storage"]
         storage = StorageSettings(

@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from nudemo.benchmarks.export import load_latest_comparison_report
 from nudemo.config import AppConfig
+from nudemo.storage.elasticsearch_store import ElasticsearchBackend
 from nudemo.explorer.media import (
     lidar_payload_to_point_cloud,
     lidar_payload_to_svg,
@@ -1413,6 +1414,104 @@ def build_explorer_html() -> str:
         overflow-wrap: anywhere;
         word-break: break-word;
       }
+      /* ── Elasticsearch annotation search ── */
+      .es-badge {
+        display: inline-block;
+        background: #1a7a5e;
+        color: #a8f0d8;
+        font-size: .65rem;
+        font-weight: 700;
+        letter-spacing: .06em;
+        padding: 1px 7px;
+        border-radius: 999px;
+        vertical-align: middle;
+        margin-left: 4px;
+      }
+      .es-input-row {
+        display: flex;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .es-input-row input {
+        flex: 1;
+        min-width: 0;
+      }
+      .es-input-row button {
+        white-space: nowrap;
+        padding: 8px 12px;
+      }
+      .es-status-line {
+        font-size: .78rem;
+        color: var(--muted);
+        margin-top: 6px;
+        min-height: 1.2em;
+      }
+      .es-status-line.unavailable { color: #f2cc0c; }
+      .es-status-line.error { color: #e05252; }
+      #es-results-section {
+        border-top: 1px dashed #2e6b54;
+        padding-top: 12px;
+        margin-top: 4px;
+      }
+      .es-results-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+      .es-hit {
+        cursor: pointer;
+      }
+      .es-hit img {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        object-fit: cover;
+        display: block;
+        background: #2a2938;
+      }
+      .es-score {
+        font-size: .7rem;
+        color: #5ab890;
+        margin-bottom: 4px;
+      }
+      .es-cats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 6px;
+      }
+      .es-cat {
+        font-size: .68rem;
+        padding: 2px 7px;
+        border-radius: 999px;
+        background: #0f2a1e;
+        border: 1px solid #1a7a5e;
+        color: #a8f0d8;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 160px;
+      }
+      .es-facets {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-top: 10px;
+      }
+      .es-facet-btn {
+        font-size: .7rem;
+        padding: 3px 9px;
+        border-radius: 999px;
+        border: 1px solid #1a7a5e;
+        background: #0f2a1e;
+        color: #a8f0d8;
+        cursor: pointer;
+      }
+      .es-facet-btn:hover { background: #1a4a32; }
+      .es-count {
+        opacity: .7;
+        margin-left: 3px;
+      }
       @media (max-width: 1380px) {
         .shell { grid-template-columns: minmax(280px, 300px) minmax(0, 1fr); }
         .detail { grid-column: 1 / -1; position: static; }
@@ -1478,10 +1577,30 @@ def build_explorer_html() -> str:
 
           <h2 style="margin-top: 24px;">Top categories</h2>
           <ul id="top_categories" class="list"></ul>
+
+          <h2 style="margin-top: 24px;">Annotation Search <span class="es-badge">ES</span></h2>
+          <div class="es-input-row">
+            <input id="es_q" type="search" placeholder="e.g. vehicle, pedestrian...">
+            <button id="es_go">Search</button>
+          </div>
+          <div id="es_status" class="es-status-line"></div>
+          <div id="es_facets" class="es-facets"></div>
         </aside>
 
         <section class="content">
           <div id="summary" class="summary-grid"></div>
+
+          <div id="es-results-section" style="display:none">
+            <div class="es-results-head">
+              <div>
+                <h2 style="margin-bottom:4px">Annotation search <span class="es-badge">ES</span></h2>
+                <span id="es_total_meta" style="font-size:.88rem;color:var(--muted)"></span>
+              </div>
+              <button id="es_close" class="secondary">Clear</button>
+            </div>
+            <div id="es_hits" class="results-grid"></div>
+          </div>
+
           <div class="results-head">
             <div>
               <h2 style="margin-bottom: 4px;">Loaded samples</h2>
@@ -1839,6 +1958,99 @@ def build_explorer_html() -> str:
           showNotice(error.message);
         }
       })();
+
+      // ── Elasticsearch annotation search ─────────────────────────────────
+      const esQ       = document.getElementById("es_q");
+      const esGo      = document.getElementById("es_go");
+      const esClose   = document.getElementById("es_close");
+      const esStatus  = document.getElementById("es_status");
+      const esFacets  = document.getElementById("es_facets");
+      const esSection = document.getElementById("es-results-section");
+      const esHits    = document.getElementById("es_hits");
+      const esTotalMeta = document.getElementById("es_total_meta");
+
+      async function runEsSearch() {
+        const q = esQ.value.trim();
+        if (!q) return;
+        esStatus.textContent = "Searching...";
+        esStatus.className = "es-status-line";
+        esSection.style.display = "none";
+        try {
+          const res = await fetch(`/api/es-search?q=${encodeURIComponent(q)}&size=24`);
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            esStatus.textContent = err.detail || `Error ${res.status}`;
+            esStatus.className = "es-status-line error";
+            return;
+          }
+          const data = await res.json();
+          esStatus.textContent = "";
+
+          esTotalMeta.textContent = `${data.total} sample${data.total !== 1 ? "s" : ""} matched`;
+          esHits.innerHTML = data.hits.length
+            ? data.hits.map(h => `
+              <div class="card sample-card es-hit" onclick="loadDetail(${h.sample_idx})">
+                <img loading="lazy" src="/api/samples/${h.sample_idx}/cameras/CAM_FRONT" alt="sample ${h.sample_idx}">
+                <div class="body">
+                  <div class="es-score">relevance ${h.score.toFixed(2)}</div>
+                  <h3>#${h.sample_idx} &middot; ${escapeHtml(h.scene_name)}</h3>
+                  <div style="font-size:.82rem;color:var(--muted)">${escapeHtml(h.location)} &middot; ${h.num_annotations} annotations</div>
+                  <div class="es-cats">${h.categories.slice(0, 4).map(c => `<span class="es-cat">${escapeHtml(c)}</span>`).join("")}</div>
+                </div>
+              </div>`).join("")
+            : `<p style="color:var(--muted)">No results for "${escapeHtml(q)}".</p>`;
+
+          const cats = (data.aggs && data.aggs.categories) || [];
+          esFacets.innerHTML = cats.length
+            ? cats.map(c =>
+                `<button class="es-facet-btn" onclick="esSetQ(${JSON.stringify(c.category)})">${escapeHtml(c.category)}<span class="es-count">${c.count}</span></button>`
+              ).join("")
+            : "";
+
+          esSection.style.display = "";
+        } catch (e) {
+          esStatus.textContent = "Elasticsearch unavailable — run: make infra-up";
+          esStatus.className = "es-status-line unavailable";
+        }
+      }
+
+      function escapeHtml(s) {
+        return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+      }
+
+      function esSetQ(term) {
+        esQ.value = term;
+        runEsSearch();
+      }
+
+      esGo.addEventListener("click", runEsSearch);
+      esQ.addEventListener("keydown", e => { if (e.key === "Enter") runEsSearch(); });
+      esClose.addEventListener("click", () => {
+        esSection.style.display = "none";
+        esFacets.innerHTML = "";
+        esQ.value = "";
+        esStatus.textContent = "";
+      });
+
+      // Check ES availability on load
+      fetch("/api/es-status").then(r => r.json()).then(data => {
+        if (!data.available) {
+          esStatus.textContent = "Elasticsearch not running";
+          esStatus.className = "es-status-line unavailable";
+          esGo.disabled = true;
+          esQ.disabled = true;
+          esQ.placeholder = "Start ES to enable annotation search";
+        } else if (data.doc_count === 0) {
+          esStatus.textContent = `Connected · no documents — run: nudemo es-index`;
+          esStatus.className = "es-status-line";
+        } else {
+          esStatus.textContent = `${data.doc_count.toLocaleString()} samples indexed`;
+          esStatus.className = "es-status-line";
+        }
+      }).catch(() => {
+        esStatus.textContent = "ES status unknown";
+        esStatus.className = "es-status-line unavailable";
+      });
     </script>
   </body>
 </html>
@@ -2942,6 +3154,7 @@ def create_app(
     ensure_metrics_exporter(config.services.postgres)
     store = ExplorerStore(config)
     report_store = BenchmarkReportStore(config.runtime.reports_root)
+    es_store = ElasticsearchBackend(url=config.services.elasticsearch.url)
     default_limit = max(1, min(result_limit, 100))
     app = FastAPI(title="nuDemo Browser", docs_url="/docs", redoc_url=None)
     install_http_metrics(app)
@@ -3006,6 +3219,35 @@ def create_app(
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=f"{exc} was not found") from exc
         except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/es-status")
+    def api_es_status() -> dict[str, Any]:
+        available = es_store.is_available()
+        return {
+            "available": available,
+            "url": config.services.elasticsearch.url,
+            "index": es_store.index,
+            "doc_count": es_store.doc_count() if available else 0,
+        }
+
+    @app.get("/api/es-search")
+    def api_es_search(
+        q: str = "",
+        location: str = "",
+        min_annotations: int = Query(default=0, ge=0),
+        size: int = Query(default=20, ge=1, le=100),
+        from_: int = Query(default=0, alias="from", ge=0),
+    ) -> dict[str, Any]:
+        if not es_store.is_available():
+            raise HTTPException(
+                status_code=503,
+                detail=f"Elasticsearch is not running at {config.services.elasticsearch.url}. "
+                "Run: make infra-up",
+            )
+        try:
+            return es_store.search(q=q, location=location, min_annotations=min_annotations, size=size, from_=from_)
+        except Exception as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/api/samples")
