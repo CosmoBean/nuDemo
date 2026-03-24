@@ -31,7 +31,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "gridPos": { "h": 6, "w": 5, "x": 0, "y": 1 },
       "id": 1,
       "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "horizontal",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
@@ -55,19 +55,40 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+      "gridPos": { "h": 6, "w": 5, "x": 5, "y": 1 },
       "id": 2,
       "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "horizontal",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
       "targets": [
         { "datasource": { "type": "prometheus", "uid": "Prometheus" },
           "expr": "nudemo_latest_span_metric_value{pattern=\"random_access\",metric_name=\"latency_p50_ms\",status=\"ok\"}",
-          "instant": true, "legendFormat": "{{backend}} p50", "refId": "A" },
+          "instant": true, "legendFormat": "{{backend}}", "refId": "A" }
+      ],
+      "title": "Random Access p50 (ms)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 20 },
+            { "color": "red", "value": 150 }
+          ]}
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 5, "x": 10, "y": 1 },
+      "id": 12,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [
         { "datasource": { "type": "prometheus", "uid": "Prometheus" },
           "expr": "nudemo_latest_span_metric_value{pattern=\"random_access\",metric_name=\"latency_p95_ms\",status=\"ok\"}",
-          "instant": true, "legendFormat": "{{backend}} p95", "refId": "B" }
+          "instant": true, "legendFormat": "{{backend}}", "refId": "A" }
       ],
-      "title": "Random Access Latency p50 / p95",
+      "title": "Random Access p95 (ms)",
       "type": "stat"
     },
     {
@@ -82,7 +103,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
+      "gridPos": { "h": 6, "w": 5, "x": 15, "y": 1 },
       "id": 3,
       "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "horizontal",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
@@ -106,7 +127,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
+      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 1 },
       "id": 4,
       "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "horizontal",
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
@@ -330,6 +351,6 @@
   "timezone": "browser",
   "title": "nuDemo — Query Latency Monitor",
   "uid": "nudemo-query-monitor",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }

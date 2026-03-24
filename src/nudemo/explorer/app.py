@@ -2949,12 +2949,13 @@ def build_compare_html() -> str:
               <th>Write samples/s</th>
               <th>Sequential samples/s</th>
               <th>Random access p50 ms</th>
+              <th>Random access p95 ms</th>
               <th>Disk MB</th>
               <th>Curation ms</th>
               <th>Status</th>
             </tr>
           </thead>
-          <tbody id="rows"><tr><td colspan="9" class="loading">Loading&hellip;</td></tr></tbody>
+          <tbody id="rows"><tr><td colspan="10" class="loading">Loading&hellip;</td></tr></tbody>
         </table>
       </div>
     </main>
@@ -2963,6 +2964,7 @@ def build_compare_html() -> str:
         { key: "write_samples_per_sec",     title: "Write / Ingest Throughput",   unit: "samples/s", higherBetter: true },
         { key: "sequential_samples_per_sec", title: "Sequential Scan Throughput", unit: "samples/s", higherBetter: true },
         { key: "random_access_p50_ms",       title: "Random Access p50 Latency",  unit: "ms",        higherBetter: false },
+        { key: "random_access_p95_ms",       title: "Random Access p95 Latency",  unit: "ms",        higherBetter: false },
         { key: "curation_query_ms",          title: "Curation Query Time",         unit: "ms",        higherBetter: false },
         { key: "disk_mb",                    title: "Disk Footprint",              unit: "MB",        higherBetter: false },
       ];
@@ -3031,6 +3033,7 @@ def build_compare_html() -> str:
         const bestWrite = Math.max(...formats.map(r => Number(r.write_samples_per_sec)).filter(Number.isFinite));
         const bestSeq = Math.max(...formats.map(r => Number(r.sequential_samples_per_sec)).filter(Number.isFinite));
         const bestRand = Math.min(...formats.map(r => Number(r.random_access_p50_ms)).filter(v => Number.isFinite(v) && v > 0));
+        const bestRandP95 = Math.min(...formats.map(r => Number(r.random_access_p95_ms)).filter(v => Number.isFinite(v) && v > 0));
         const bestDisk = Math.min(...formats.map(r => Number(r.disk_mb)).filter(v => Number.isFinite(v) && v > 0));
         const bestCur = Math.min(...formats.map(r => Number(r.curation_query_ms)).filter(v => Number.isFinite(v) && v > 0));
 
@@ -3044,6 +3047,7 @@ def build_compare_html() -> str:
             <td class="${isBest(r.write_samples_per_sec, bestWrite) ? "best" : ""}">${fmt(r.write_samples_per_sec)}</td>
             <td class="${isBest(r.sequential_samples_per_sec, bestSeq) ? "best" : ""}">${fmt(r.sequential_samples_per_sec)}</td>
             <td class="${isBest(r.random_access_p50_ms, bestRand) ? "best" : ""}">${fmt(r.random_access_p50_ms)}</td>
+            <td class="${isBest(r.random_access_p95_ms, bestRandP95) ? "best" : ""}">${fmt(r.random_access_p95_ms)}</td>
             <td class="${isBest(r.disk_mb, bestDisk) ? "best" : ""}">${fmt(r.disk_mb)}</td>
             <td class="${isBest(r.curation_query_ms, bestCur) ? "best" : ""}">${fmt(r.curation_query_ms)}</td>
             <td>${r.status}</td>
@@ -3059,7 +3063,7 @@ def build_compare_html() -> str:
         } catch (err) {
           document.getElementById("meta").textContent = "Could not load benchmark data: " + err.message;
           document.getElementById("charts").innerHTML = "";
-          document.getElementById("rows").innerHTML = `<tr><td colspan="9">Error loading data.</td></tr>`;
+          document.getElementById("rows").innerHTML = `<tr><td colspan="10">Error loading data.</td></tr>`;
           return;
         }
 
@@ -3086,7 +3090,7 @@ def build_compare_html() -> str:
 
         document.getElementById("rows").innerHTML = blobFormats.length
           ? buildTable(blobFormats)
-          : `<tr><td colspan="9" style="color:var(--muted)">No data.</td></tr>`;
+          : `<tr><td colspan="10" style="color:var(--muted)">No data.</td></tr>`;
 
         if (redisData) {
           document.getElementById("redis-section").style.display = "";
@@ -3094,6 +3098,7 @@ def build_compare_html() -> str:
             { label: "Write throughput", value: redisData.write_samples_per_sec, unit: "samples/s" },
             { label: "Sequential scan (metadata)", value: redisData.sequential_samples_per_sec, unit: "samples/s" },
             { label: "Random access p50", value: redisData.random_access_p50_ms, unit: "ms" },
+            { label: "Random access p95", value: redisData.random_access_p95_ms, unit: "ms" },
             { label: "Curation query", value: redisData.curation_query_ms, unit: "ms" },
             { label: "Disk (metadata only)", value: redisData.disk_mb, unit: "MB" },
           ];

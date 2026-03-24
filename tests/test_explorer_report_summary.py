@@ -37,7 +37,7 @@ class BenchmarkReportStoreTests(unittest.TestCase):
                     stage="evaluation",
                     backend="Parquet",
                     pattern="random_access",
-                    metrics={"latency_p50_ms": 8.3},
+                    metrics={"latency_p50_ms": 8.3, "latency_p95_ms": 14.7},
                 ),
                 BenchmarkResult(
                     stage="storage",
@@ -67,7 +67,7 @@ class BenchmarkReportStoreTests(unittest.TestCase):
                     stage="evaluation",
                     backend="Redis",
                     pattern="random_access",
-                    metrics={"latency_p50_ms": 0.7},
+                    metrics={"latency_p50_ms": 0.7, "latency_p95_ms": 1.1},
                 ),
             ],
         )
@@ -89,6 +89,7 @@ class BenchmarkReportStoreTests(unittest.TestCase):
         self.assertAlmostEqual(formats["Parquet"]["disk_mb"], 28.5)
         self.assertEqual(formats["Parquet"]["status"], "ok")
         self.assertAlmostEqual(formats["Redis"]["random_access_p50_ms"], 0.7)
+        self.assertAlmostEqual(formats["Redis"]["random_access_p95_ms"], 1.1)
         self.assertEqual(payload["comparison_note"], "All backend rows come from the same sample and scene scope.")
 
     def test_fetch_summary_uses_latest_report_per_backend(self) -> None:
@@ -113,7 +114,7 @@ class BenchmarkReportStoreTests(unittest.TestCase):
                     stage="evaluation",
                     backend="MinIO+PostgreSQL",
                     pattern="random_access",
-                    metrics={"latency_p50_ms": 12.69},
+                    metrics={"latency_p50_ms": 12.69, "latency_p95_ms": 13.36},
                 ),
             ],
         )
@@ -138,7 +139,7 @@ class BenchmarkReportStoreTests(unittest.TestCase):
                     stage="evaluation",
                     backend="Redis",
                     pattern="random_access",
-                    metrics={"latency_p50_ms": 0.75},
+                    metrics={"latency_p50_ms": 0.75, "latency_p95_ms": 0.98},
                 ),
             ],
         )
@@ -168,6 +169,7 @@ class BenchmarkReportStoreTests(unittest.TestCase):
         self.assertEqual(formats["Redis"]["samples"], 100)
         self.assertEqual(formats["Redis"]["scenes"], 3)
         self.assertAlmostEqual(formats["Redis"]["write_samples_per_sec"], 183.4)
+        self.assertAlmostEqual(formats["MinIO+PostgreSQL"]["random_access_p95_ms"], 13.36)
 
 
 if __name__ == "__main__":

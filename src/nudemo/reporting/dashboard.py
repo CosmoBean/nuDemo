@@ -305,6 +305,7 @@ def build_storage_format_rows(report: BenchmarkReport) -> list[dict[str, object]
                     scan_result, "throughput_mean", "throughput_samples_per_sec"
                 ),
                 "random_access_p50_ms": _metric(random_result, "latency_p50_ms"),
+                "random_access_p95_ms": _metric(random_result, "latency_p95_ms"),
                 "disk_mb": _metric(disk_result, "disk_mb"),
                 "curation_query_ms": _metric(
                     curation_result, "query_time_ms_mean", "query_time_ms"
@@ -390,6 +391,7 @@ def _build_comparison_cards(storage_rows: list[dict[str, object]]) -> str:
             "samples/s",
         ),
         ("Random Access", "random_access_p50_ms", "lower is better", False, "ms p50"),
+        ("Random Access p95", "random_access_p95_ms", "lower is better", False, "ms p95"),
         ("Curation Query", "curation_query_ms", "lower is better", False, "ms"),
         ("Disk Footprint", "disk_mb", "lower is better", False, "MB"),
     ]
@@ -459,6 +461,7 @@ def _build_storage_summary_table(storage_rows: list[dict[str, object]]) -> str:
         (
             "<tr><th>Backend</th><th>Dataset Scope</th><th>Write samples/s</th>"
             "<th>Sequential samples/s</th><th>Random access p50 ms</th>"
+            "<th>Random access p95 ms</th>"
             "<th>Disk MB</th><th>Curation ms</th><th>Status</th></tr>"
         )
     ]
@@ -470,6 +473,7 @@ def _build_storage_summary_table(storage_rows: list[dict[str, object]]) -> str:
             f"<td>{escape(_format_table_metric(row.get('write_samples_per_sec')))}</td>"
             f"<td>{escape(_format_table_metric(row.get('sequential_samples_per_sec')))}</td>"
             f"<td>{escape(_format_table_metric(row.get('random_access_p50_ms')))}</td>"
+            f"<td>{escape(_format_table_metric(row.get('random_access_p95_ms')))}</td>"
             f"<td>{escape(_format_table_metric(row.get('disk_mb')))}</td>"
             f"<td>{escape(_format_table_metric(row.get('curation_query_ms')))}</td>"
             f"<td>{escape(str(row.get('status', 'unknown')))}</td>"

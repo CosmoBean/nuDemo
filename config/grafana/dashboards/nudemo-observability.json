@@ -370,7 +370,7 @@
       },
       "gridPos": {
         "h": 9,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 16
       },
@@ -417,8 +417,8 @@
       },
       "gridPos": {
         "h": 9,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 6,
         "y": 16
       },
       "id": 9,
@@ -453,106 +453,97 @@
     },
     {
       "datasource": {
-        "type": "postgres",
-        "uid": "nudemo-postgres"
+        "type": "prometheus",
+        "uid": "Prometheus"
       },
       "fieldConfig": {
-        "defaults": {},
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "backend"
-            },
-            "properties": [
-              {
-                "id": "displayName",
-                "value": "Backend"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "p50 (ms)"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "ms"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "p95 (ms)"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "ms"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "p99 (ms)"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "ms"
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "run_at"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "dateTimeAsLocal"
-              }
-            ]
-          }
-        ]
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
       },
       "gridPos": {
         "h": 9,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 12,
         "y": 16
       },
       "id": 10,
       "options": {
-        "footer": {
-          "show": false
+        "displayMode": "gradient",
+        "minVizHeight": 12,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "showHeader": true,
-        "sortBy": [
-          {
-            "desc": false,
-            "displayName": "p50 (ms)"
-          }
-        ]
+        "showUnfilled": true
       },
       "targets": [
         {
           "datasource": {
-            "type": "postgres",
-            "uid": "nudemo-postgres"
+            "type": "prometheus",
+            "uid": "Prometheus"
           },
-          "format": "table",
-          "rawSql": "WITH latest AS (SELECT DISTINCT ON (backend) backend, started_at, (metrics->>'latency_p50_ms')::numeric AS p50_ms, (metrics->>'latency_p95_ms')::numeric AS p95_ms, (metrics->>'latency_p99_ms')::numeric AS p99_ms FROM telemetry_spans WHERE pattern = 'random_access' AND status = 'ok' AND (metrics->>'latency_p50_ms') IS NOT NULL ORDER BY backend, started_at DESC) SELECT backend, ROUND(p50_ms, 3) AS \"p50 (ms)\", ROUND(p95_ms, 3) AS \"p95 (ms)\", ROUND(p99_ms, 3) AS \"p99 (ms)\", started_at AS run_at FROM latest ORDER BY 2 ASC",
+          "expr": "nudemo_latest_span_metric_value{pattern=\"random_access\",metric_name=\"latency_p50_ms\",status=\"ok\"}",
+          "instant": true,
+          "legendFormat": "{{backend}}",
           "refId": "A"
         }
       ],
-      "title": "Latest Random Access Percentiles",
-      "type": "table"
+      "title": "Random Access p50",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 6,
+        "x": 18,
+        "y": 16
+      },
+      "id": 13,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 12,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "expr": "nudemo_latest_span_metric_value{pattern=\"random_access\",metric_name=\"latency_p95_ms\",status=\"ok\"}",
+          "instant": true,
+          "legendFormat": "{{backend}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Random Access p95",
+      "type": "bargauge"
     },
     {
       "datasource": {
@@ -668,6 +659,6 @@
   "timezone": "browser",
   "title": "nuDemo Observability",
   "uid": "nudemo-observability",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
