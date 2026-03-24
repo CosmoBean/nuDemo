@@ -638,14 +638,12 @@ def build_browser_home_html() -> str:
         padding: 28px;
         box-shadow: var(--shadow);
       }
-      /* two-column diagram: pipeline left, observability right */
       .arch-diagram {
         display: grid;
-        grid-template-columns: 1fr 200px;
-        gap: 24px;
+        grid-template-columns: minmax(0, 1fr) 220px;
+        gap: 20px;
         align-items: start;
       }
-      /* ── pipeline column ── */
       .pipeline {
         display: flex;
         flex-direction: column;
@@ -654,31 +652,31 @@ def build_browser_home_html() -> str:
       }
       .pipe-node {
         display: flex;
-        gap: 16px;
+        gap: 14px;
         align-items: flex-start;
-        background: var(--accent-soft);
-        border: 2px solid var(--line);
-        border-radius: 16px;
-        padding: 16px 18px;
+        background: #111119;
+        border: 1px solid #2f2b54;
+        border-radius: 14px;
+        padding: 14px 16px;
       }
-      .pipe-node--proc  { border-color: #7c5ab8; background: #1a1630; }
-      .pipe-node--storage { border-color: var(--accent); border-width: 3px; }
-      .pipe-node--work  { border-color: #3a7a5c; background: #0f1c16; }
       .pipe-step {
-        font-size: 1.6rem;
-        font-weight: 900;
-        color: var(--accent);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 34px;
+        height: 34px;
+        border-radius: 999px;
+        border: 1px solid #3b3567;
+        background: #16142a;
+        color: var(--ink);
+        font-size: 0.78rem;
+        font-weight: 700;
         line-height: 1;
-        min-width: 36px;
-        padding-top: 2px;
-        letter-spacing: -.04em;
+        letter-spacing: 0.02em;
       }
-      .pipe-node--proc  .pipe-step { color: #a07ad0; }
-      .pipe-node--storage .pipe-step { color: var(--accent); }
-      .pipe-node--work  .pipe-step { color: #5ab890; }
       .pipe-body { display: flex; flex-direction: column; gap: 8px; flex: 1; }
       .pipe-name {
-        font-size: 1.05rem;
+        font-size: 0.95rem;
         font-weight: 700;
         line-height: 1;
         display: flex;
@@ -686,82 +684,78 @@ def build_browser_home_html() -> str:
         gap: 8px;
       }
       .pipe-sub {
-        font-size: 0.74rem;
+        font-size: 0.72rem;
         color: var(--muted);
         line-height: 1.4;
       }
       .op-chips {
         display: flex;
         flex-wrap: wrap;
-        gap: 5px;
+        gap: 6px;
       }
       .op-chip {
-        font-size: 0.7rem;
-        padding: 3px 9px;
+        font-size: 0.68rem;
+        padding: 3px 8px;
         border-radius: 999px;
-        border: 1px solid var(--line);
-        background: #12101e;
+        border: 1px solid #2f2b54;
+        background: #141420;
         color: var(--muted);
       }
       .swap-badge {
         display: inline-block;
-        background: var(--accent);
-        color: var(--ink);
-        font-size: 0.68rem;
-        font-weight: 700;
-        padding: 2px 9px;
+        background: #16142a;
+        color: var(--muted);
+        font-size: 0.64rem;
+        font-weight: 600;
+        padding: 2px 8px;
         border-radius: 999px;
+        border: 1px solid #3b3567;
       }
       .backend-grid {
         display: flex;
         flex-wrap: wrap;
-        gap: 5px;
+        gap: 6px;
       }
       .backend-pill {
-        font-size: 0.72rem;
-        padding: 4px 10px;
+        font-size: 0.68rem;
+        padding: 4px 8px;
         border-radius: 8px;
-        border: 1px solid var(--line);
-        background: #12101e;
+        border: 1px solid #2f2b54;
+        background: #141420;
         color: var(--ink);
       }
       .cache-row {
-        margin-top: 4px;
-        padding-top: 12px;
-        border-top: 1px dashed #3a3560;
+        margin-top: 2px;
+        padding-top: 10px;
+        border-top: 1px solid #26233f;
       }
       .cache-node {
         display: flex;
-        align-items: center;
-        gap: 10px;
+        align-items: baseline;
+        gap: 8px;
         flex-wrap: wrap;
       }
       .cache-label {
         font-size: 0.66rem;
         text-transform: uppercase;
         letter-spacing: .1em;
-        color: #f2cc0c88;
+        color: var(--muted);
       }
       .cache-name {
-        font-size: 0.88rem;
+        font-size: 0.82rem;
         font-weight: 700;
         color: var(--ink);
       }
       .cache-perf {
-        font-size: 0.7rem;
+        font-size: 0.68rem;
         color: var(--muted);
       }
-      .cache-perf .good { color: #73BF69; font-weight: 700; }
-      .cache-perf .warn { color: #f2cc0c; font-weight: 700; }
       .pipe-arrow {
-        text-align: center;
-        font-size: 1.3rem;
-        color: var(--accent);
-        padding: 4px 0;
-        margin-left: 28px;
-        opacity: .7;
+        width: 1px;
+        height: 18px;
+        margin: 2px 0 2px 16px;
+        background: #2f2b54;
       }
-      /* ── observability column ── */
       .obs-stack {
         display: flex;
         flex-direction: column;
@@ -774,17 +768,17 @@ def build_browser_home_html() -> str:
         letter-spacing: .12em;
         color: var(--muted);
         margin-bottom: 10px;
-        text-align: center;
+        text-align: left;
       }
       .obs-node {
-        border: 1px solid #3a3560;
-        border-radius: 12px;
+        border: 1px solid #2f2b54;
+        border-radius: 14px;
         padding: 12px 14px;
-        background: #0f0e1a;
-        text-align: center;
+        background: #111119;
+        text-align: left;
       }
       .obs-name {
-        font-size: 0.9rem;
+        font-size: 0.86rem;
         font-weight: 700;
         color: var(--ink);
       }
@@ -794,35 +788,10 @@ def build_browser_home_html() -> str:
         margin-top: 3px;
       }
       .obs-arrow {
-        text-align: center;
-        font-size: 1rem;
-        color: #3a3560;
-        padding: 3px 0;
-      }
-      /* ── footer badges ── */
-      .service-badges {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        flex-wrap: wrap;
-        margin-top: 20px;
-        padding-top: 14px;
-        border-top: 1px solid #2a2840;
-      }
-      .badge-label {
-        font-size: .66rem;
-        text-transform: uppercase;
-        letter-spacing: .1em;
-        color: var(--muted);
-        margin-right: 4px;
-      }
-      .service-badge {
-        font-size: .72rem;
-        padding: 3px 10px;
-        border-radius: 999px;
-        border: 1px solid var(--line);
-        background: var(--accent-soft);
-        color: var(--ink);
+        width: 1px;
+        height: 16px;
+        margin: 2px 0 2px 12px;
+        background: #2f2b54;
       }
       @media (max-width: 860px) {
         .hero-inner { grid-template-columns: 1fr; }
@@ -906,9 +875,9 @@ def build_browser_home_html() -> str:
               </div>
             </div>
 
-            <div class="pipe-arrow">&#8595;</div>
+            <div class="pipe-arrow"></div>
 
-            <div class="pipe-node pipe-node--proc">
+            <div class="pipe-node">
               <div class="pipe-step">02</div>
               <div class="pipe-body">
                 <div class="pipe-name">Preprocessing</div>
@@ -924,12 +893,12 @@ def build_browser_home_html() -> str:
               </div>
             </div>
 
-            <div class="pipe-arrow">&#8595;</div>
+            <div class="pipe-arrow"></div>
 
-            <div class="pipe-node pipe-node--storage">
+            <div class="pipe-node">
               <div class="pipe-step">03</div>
               <div class="pipe-body">
-                <div class="pipe-name">Storage &nbsp;<span class="swap-badge">&#8644; swappable</span></div>
+                <div class="pipe-name">Storage <span class="swap-badge">swappable</span></div>
                 <div class="backend-grid">
                   <span class="backend-pill">MinIO + PostgreSQL</span>
                   <span class="backend-pill">Lance</span>
@@ -938,17 +907,17 @@ def build_browser_home_html() -> str:
                 </div>
                 <div class="cache-row">
                   <div class="cache-node">
-                    <span class="cache-label">Cache &middot; async via Kafka</span>
+                    <span class="cache-label">Cache</span>
                     <span class="cache-name">Redis</span>
-                    <span class="cache-perf"><span class="warn">~3.4 msg/s</span> Kafka &nbsp;vs&nbsp; <span class="good">35+ s/s</span> direct</span>
+                    <span class="cache-perf">async via Kafka for metadata and embeddings</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div class="pipe-arrow">&#8595;</div>
+            <div class="pipe-arrow"></div>
 
-            <div class="pipe-node pipe-node--work">
+            <div class="pipe-node">
               <div class="pipe-step">04</div>
               <div class="pipe-body">
                 <div class="pipe-name">Workloads</div>
@@ -968,37 +937,27 @@ def build_browser_home_html() -> str:
             <div class="obs-col-label">Observability</div>
 
             <div class="obs-node">
-              <div class="obs-name">:9464</div>
-              <div class="obs-sub">app metrics</div>
+              <div class="obs-name">App metrics</div>
+              <div class="obs-sub">Prometheus endpoint on :9464</div>
             </div>
-            <div class="obs-arrow">&#8595;</div>
+            <div class="obs-arrow"></div>
             <div class="obs-node">
               <div class="obs-name">Prometheus</div>
-              <div class="obs-sub">scrape &middot; 15 s</div>
+              <div class="obs-sub">scrape and retain time-series metrics</div>
             </div>
-            <div class="obs-arrow">&#8595;</div>
+            <div class="obs-arrow"></div>
             <div class="obs-node">
               <div class="obs-name">Grafana</div>
-              <div class="obs-sub">dashboards</div>
+              <div class="obs-sub">benchmark and telemetry dashboards</div>
             </div>
-            <div class="obs-arrow">&#8595;</div>
+            <div class="obs-arrow"></div>
             <div class="obs-node">
-              <div class="obs-name">Browser UI</div>
-              <div class="obs-sub">/grafana-dashboard</div>
+              <div class="obs-name">Shared view</div>
+              <div class="obs-sub">linked from the browser landing page</div>
             </div>
 
           </div>
 
-        </div>
-
-        <div class="service-badges">
-          <span class="badge-label">Docker Compose</span>
-          <span class="service-badge">Kafka</span>
-          <span class="service-badge">MinIO</span>
-          <span class="service-badge">PostgreSQL</span>
-          <span class="service-badge">Redis</span>
-          <span class="service-badge">Prometheus</span>
-          <span class="service-badge">Grafana</span>
         </div>
 
       </section>
