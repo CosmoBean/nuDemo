@@ -564,114 +564,177 @@ def build_browser_home_html() -> str:
         background: var(--panel);
         border: 3px solid var(--line);
         border-radius: 22px;
-        padding: 28px 28px 24px;
+        padding: 28px;
         box-shadow: var(--shadow);
       }
-      .lane-label {
-        font-size: 0.68rem;
-        text-transform: uppercase;
-        letter-spacing: .12em;
-        color: var(--muted);
-        margin-bottom: 8px;
-        margin-top: 4px;
+      /* two-column diagram: pipeline left, observability right */
+      .arch-diagram {
+        display: grid;
+        grid-template-columns: 1fr 200px;
+        gap: 24px;
+        align-items: start;
       }
-      .arch-flow {
+      /* ── pipeline column ── */
+      .pipeline {
         display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0;
+      }
+      .pipe-node {
+        display: flex;
+        gap: 16px;
         align-items: flex-start;
-        gap: 6px;
-        overflow-x: auto;
-        padding-bottom: 4px;
-      }
-      .flow-arrow {
-        font-size: 1.5rem;
-        color: var(--accent);
-        padding: 18px 2px 0;
-        flex-shrink: 0;
-        line-height: 1;
-      }
-      .arch-node {
-        border: 2px solid var(--line);
-        border-radius: 14px;
-        padding: 14px 16px;
         background: var(--accent-soft);
-        min-width: 148px;
-        flex-shrink: 0;
+        border: 2px solid var(--line);
+        border-radius: 16px;
+        padding: 16px 18px;
       }
-      .arch-node--storage {
-        border-color: var(--accent);
-        border-width: 3px;
+      .pipe-node--proc  { border-color: #7c5ab8; background: #1a1630; }
+      .pipe-node--storage { border-color: var(--accent); border-width: 3px; }
+      .pipe-node--work  { border-color: #3a7a5c; background: #0f1c16; }
+      .pipe-step {
+        font-size: 1.6rem;
+        font-weight: 900;
+        color: var(--accent);
+        line-height: 1;
+        min-width: 36px;
+        padding-top: 2px;
+        letter-spacing: -.04em;
       }
-      .arch-node--cache {
-        border: 2px dashed var(--line);
-        border-radius: 12px;
-        padding: 10px 14px;
-        margin-top: 10px;
-        background: #0f0e1a;
-      }
-      .node-tag {
-        font-size: 0.66rem;
-        text-transform: uppercase;
-        letter-spacing: .1em;
-        color: var(--muted);
-        margin-bottom: 5px;
-      }
-      .node-name {
-        font-size: 1rem;
+      .pipe-node--proc  .pipe-step { color: #a07ad0; }
+      .pipe-node--storage .pipe-step { color: var(--accent); }
+      .pipe-node--work  .pipe-step { color: #5ab890; }
+      .pipe-body { display: flex; flex-direction: column; gap: 8px; flex: 1; }
+      .pipe-name {
+        font-size: 1.05rem;
         font-weight: 700;
-        margin-bottom: 6px;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
-      .node-detail {
-        font-size: 0.76rem;
+      .pipe-sub {
+        font-size: 0.74rem;
         color: var(--muted);
-        line-height: 1.75;
+        line-height: 1.4;
+      }
+      .op-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+      .op-chip {
+        font-size: 0.7rem;
+        padding: 3px 9px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: #12101e;
+        color: var(--muted);
       }
       .swap-badge {
         display: inline-block;
         background: var(--accent);
         color: var(--ink);
-        font-size: 0.7rem;
+        font-size: 0.68rem;
         font-weight: 700;
-        letter-spacing: .04em;
-        padding: 2px 10px;
+        padding: 2px 9px;
         border-radius: 999px;
       }
-      .backend-list {
+      .backend-grid {
         display: flex;
-        flex-direction: column;
-        gap: 4px;
-        margin-top: 8px;
+        flex-wrap: wrap;
+        gap: 5px;
       }
-      .backend-item {
-        font-size: 0.76rem;
+      .backend-pill {
+        font-size: 0.72rem;
         padding: 4px 10px;
         border-radius: 8px;
         border: 1px solid var(--line);
         background: #12101e;
+        color: var(--ink);
       }
-      .cache-divider {
-        border: none;
-        border-top: 1px dashed var(--line);
-        margin: 10px 0 0;
+      .cache-row {
+        margin-top: 4px;
+        padding-top: 12px;
+        border-top: 1px dashed #3a3560;
+      }
+      .cache-node {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .cache-label {
+        font-size: 0.66rem;
+        text-transform: uppercase;
+        letter-spacing: .1em;
+        color: #f2cc0c88;
+      }
+      .cache-name {
+        font-size: 0.88rem;
+        font-weight: 700;
+        color: var(--ink);
+      }
+      .cache-perf {
+        font-size: 0.7rem;
+        color: var(--muted);
+      }
+      .cache-perf .good { color: #73BF69; font-weight: 700; }
+      .cache-perf .warn { color: #f2cc0c; font-weight: 700; }
+      .pipe-arrow {
+        text-align: center;
+        font-size: 1.3rem;
+        color: var(--accent);
+        padding: 4px 0;
+        margin-left: 28px;
+        opacity: .7;
+      }
+      /* ── observability column ── */
+      .obs-stack {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0;
+      }
+      .obs-col-label {
+        font-size: 0.66rem;
+        text-transform: uppercase;
+        letter-spacing: .12em;
+        color: var(--muted);
+        margin-bottom: 10px;
+        text-align: center;
       }
       .obs-node {
         border: 1px solid #3a3560;
         border-radius: 12px;
         padding: 12px 14px;
         background: #0f0e1a;
-        min-width: 130px;
-        flex-shrink: 0;
+        text-align: center;
       }
-      .obs-sep {
-        margin-top: 20px;
-        padding-top: 18px;
-        border-top: 1px dashed #3a3560;
+      .obs-name {
+        font-size: 0.9rem;
+        font-weight: 700;
+        color: var(--ink);
       }
+      .obs-sub {
+        font-size: 0.68rem;
+        color: var(--muted);
+        margin-top: 3px;
+      }
+      .obs-arrow {
+        text-align: center;
+        font-size: 1rem;
+        color: #3a3560;
+        padding: 3px 0;
+      }
+      /* ── footer badges ── */
       .service-badges {
         display: flex;
         align-items: center;
         gap: 7px;
         flex-wrap: wrap;
-        margin-top: 18px;
+        margin-top: 20px;
         padding-top: 14px;
         border-top: 1px solid #2a2840;
       }
@@ -690,19 +753,10 @@ def build_browser_home_html() -> str:
         background: var(--accent-soft);
         color: var(--ink);
       }
-      .perf-chip {
-        display: inline-flex;
-        gap: 6px;
-        font-size: .72rem;
-        color: var(--muted);
-      }
-      .perf-chip .good { color: #73BF69; font-weight: 700; }
-      .perf-chip .warn { color: #f2cc0c; font-weight: 700; }
       @media (max-width: 860px) {
         .hero-inner { grid-template-columns: 1fr; }
         .link-row { align-items: flex-start; flex-direction: column; }
-        .arch-flow { flex-direction: column; gap: 4px; }
-        .flow-arrow { padding: 2px 0; transform: rotate(90deg); }
+        .arch-diagram { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -762,87 +816,108 @@ def build_browser_home_html() -> str:
 
       <div class="section-title">Architecture</div>
       <section class="arch-panel">
+        <div class="arch-diagram">
 
-        <div class="lane-label">Data path</div>
-        <div class="arch-flow">
+          <!-- ── Main data pipeline (vertical) ── -->
+          <div class="pipeline">
 
-          <div class="arch-node">
-            <div class="node-tag">01 &middot; Source</div>
-            <div class="node-name">nuScenes</div>
-            <div class="node-detail">850 scenes · 34,149 samples<br>6 cameras · LiDAR · 5 radars</div>
-          </div>
-
-          <div class="flow-arrow">&#8594;</div>
-
-          <div class="arch-node">
-            <div class="node-tag">02 &middot; Extract</div>
-            <div class="node-name">Pipeline</div>
-            <div class="node-detail">JPEG · numpy · annotations</div>
-          </div>
-
-          <div class="flow-arrow">&#8594;</div>
-
-          <div class="arch-node arch-node--storage">
-            <div class="node-tag">03 &middot; Store &nbsp;<span class="swap-badge">&#8644;&nbsp;swappable</span></div>
-            <div class="backend-list" style="margin-top:8px">
-              <div class="backend-item">MinIO + PostgreSQL</div>
-              <div class="backend-item">Lance</div>
-              <div class="backend-item">Parquet</div>
-              <div class="backend-item">WebDataset</div>
+            <div class="pipe-node">
+              <div class="pipe-step">01</div>
+              <div class="pipe-body">
+                <div class="pipe-name">nuScenes</div>
+                <div class="pipe-sub">v1.0-trainval &nbsp;&middot;&nbsp; 850 scenes &nbsp;&middot;&nbsp; 34,149 samples</div>
+                <div class="op-chips">
+                  <span class="op-chip">6 cameras</span>
+                  <span class="op-chip">LiDAR</span>
+                  <span class="op-chip">5 radars</span>
+                  <span class="op-chip">annotations</span>
+                </div>
+              </div>
             </div>
-            <hr class="cache-divider">
-            <div class="arch-node--cache">
-              <div class="node-tag">Cache &nbsp;<span style="color:#f2cc0c88;font-size:.65rem">via Kafka · async</span></div>
-              <div class="node-name" style="font-size:.88rem">Redis</div>
-              <div class="node-detail">metadata · embeddings<br><span class="perf-chip"><span class="warn">~3.4 msg/s</span> Kafka &nbsp;vs&nbsp; <span class="good">35+ s/s</span> direct</span></div>
+
+            <div class="pipe-arrow">&#8595;</div>
+
+            <div class="pipe-node pipe-node--proc">
+              <div class="pipe-step">02</div>
+              <div class="pipe-body">
+                <div class="pipe-name">Preprocessing</div>
+                <div class="pipe-sub">Per sample &nbsp;&middot;&nbsp; per sensor</div>
+                <div class="op-chips">
+                  <span class="op-chip">JPEG encode</span>
+                  <span class="op-chip">numpy pack</span>
+                  <span class="op-chip">annotation parse</span>
+                  <span class="op-chip">scene walk</span>
+                  <span class="op-chip">token index</span>
+                  <span class="op-chip">embedding gen</span>
+                </div>
+              </div>
             </div>
+
+            <div class="pipe-arrow">&#8595;</div>
+
+            <div class="pipe-node pipe-node--storage">
+              <div class="pipe-step">03</div>
+              <div class="pipe-body">
+                <div class="pipe-name">Storage &nbsp;<span class="swap-badge">&#8644; swappable</span></div>
+                <div class="backend-grid">
+                  <span class="backend-pill">MinIO + PostgreSQL</span>
+                  <span class="backend-pill">Lance</span>
+                  <span class="backend-pill">Parquet</span>
+                  <span class="backend-pill">WebDataset</span>
+                </div>
+                <div class="cache-row">
+                  <div class="cache-node">
+                    <span class="cache-label">Cache &middot; async via Kafka</span>
+                    <span class="cache-name">Redis</span>
+                    <span class="cache-perf"><span class="warn">~3.4 msg/s</span> Kafka &nbsp;vs&nbsp; <span class="good">35+ s/s</span> direct</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="pipe-arrow">&#8595;</div>
+
+            <div class="pipe-node pipe-node--work">
+              <div class="pipe-step">04</div>
+              <div class="pipe-body">
+                <div class="pipe-name">Workloads</div>
+                <div class="op-chips">
+                  <span class="op-chip">sequential scan</span>
+                  <span class="op-chip">random access</span>
+                  <span class="op-chip">curation query</span>
+                  <span class="op-chip">explorer UI</span>
+                </div>
+              </div>
+            </div>
+
           </div>
 
-          <div class="flow-arrow">&#8594;</div>
-
-          <div class="arch-node">
-            <div class="node-tag">04 &middot; Consume</div>
-            <div class="node-name">Workloads</div>
-            <div class="node-detail">train · eval · curate · UI</div>
-          </div>
-
-        </div>
-
-        <div class="obs-sep">
-          <div class="lane-label">Observability path</div>
-          <div class="arch-flow">
+          <!-- ── Observability stack (right column) ── -->
+          <div class="obs-stack">
+            <div class="obs-col-label">Observability</div>
 
             <div class="obs-node">
-              <div class="node-tag">App metrics</div>
-              <div class="node-name" style="font-size:.88rem">:9464</div>
-              <div class="node-detail">OpenTelemetry<br>span &amp; run metrics</div>
+              <div class="obs-name">:9464</div>
+              <div class="obs-sub">app metrics</div>
             </div>
-
-            <div class="flow-arrow">&#8594;</div>
-
+            <div class="obs-arrow">&#8595;</div>
             <div class="obs-node">
-              <div class="node-tag">Scrape &middot; 15 s</div>
-              <div class="node-name" style="font-size:.88rem">Prometheus</div>
-              <div class="node-detail">nudemo_* gauges<br>service pressure</div>
+              <div class="obs-name">Prometheus</div>
+              <div class="obs-sub">scrape &middot; 15 s</div>
             </div>
-
-            <div class="flow-arrow">&#8594;</div>
-
+            <div class="obs-arrow">&#8595;</div>
             <div class="obs-node">
-              <div class="node-tag">Dashboards</div>
-              <div class="node-name" style="font-size:.88rem">Grafana</div>
-              <div class="node-detail">backend compare<br>query monitor</div>
+              <div class="obs-name">Grafana</div>
+              <div class="obs-sub">dashboards</div>
             </div>
-
-            <div class="flow-arrow">&#8594;</div>
-
+            <div class="obs-arrow">&#8595;</div>
             <div class="obs-node">
-              <div class="node-tag">Proxy &middot; /grafana-dashboard</div>
-              <div class="node-name" style="font-size:.88rem">Browser UI</div>
-              <div class="node-detail">this app</div>
+              <div class="obs-name">Browser UI</div>
+              <div class="obs-sub">/grafana-dashboard</div>
             </div>
 
           </div>
+
         </div>
 
         <div class="service-badges">
