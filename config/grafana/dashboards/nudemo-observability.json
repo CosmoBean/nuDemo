@@ -395,13 +395,13 @@
             "type": "prometheus",
             "uid": "Prometheus"
           },
-          "expr": "nudemo_latest_span_metric_value{pattern=\"write_throughput\",metric_name=\"throughput_samples_per_sec\",status=\"ok\"}",
+          "expr": "nudemo_latest_span_metric_value{pattern=\"batch_ingest\",metric_name=\"throughput_samples_per_sec\",status=\"ok\"}",
           "instant": true,
           "legendFormat": "{{backend}}",
           "refId": "A"
         }
       ],
-      "title": "Storage Write Throughput",
+      "title": "Storage Ingest Throughput",
       "type": "bargauge"
     },
     {
@@ -453,14 +453,73 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "Prometheus"
+        "type": "postgres",
+        "uid": "nudemo-postgres"
       },
       "fieldConfig": {
-        "defaults": {
-          "unit": "ms"
-        },
-        "overrides": []
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "backend"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Backend"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p50 (ms)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p95 (ms)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "p99 (ms)"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "ms"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "run_at"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsLocal"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 9,
@@ -470,33 +529,30 @@
       },
       "id": 10,
       "options": {
-        "displayMode": "gradient",
-        "minVizHeight": 12,
-        "minVizWidth": 0,
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "footer": {
+          "show": false
         },
-        "showUnfilled": true
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": false,
+            "displayName": "p50 (ms)"
+          }
+        ]
       },
       "targets": [
         {
           "datasource": {
-            "type": "prometheus",
-            "uid": "Prometheus"
+            "type": "postgres",
+            "uid": "nudemo-postgres"
           },
-          "expr": "nudemo_latest_span_metric_value{pattern=\"random_access\",metric_name=\"latency_p50_ms\",status=\"ok\"}",
-          "instant": true,
-          "legendFormat": "{{backend}}",
+          "format": "table",
+          "rawSql": "WITH latest AS (SELECT DISTINCT ON (backend) backend, started_at, (metrics->>'latency_p50_ms')::numeric AS p50_ms, (metrics->>'latency_p95_ms')::numeric AS p95_ms, (metrics->>'latency_p99_ms')::numeric AS p99_ms FROM telemetry_spans WHERE pattern = 'random_access' AND status = 'ok' AND (metrics->>'latency_p50_ms') IS NOT NULL ORDER BY backend, started_at DESC) SELECT backend, ROUND(p50_ms, 3) AS \"p50 (ms)\", ROUND(p95_ms, 3) AS \"p95 (ms)\", ROUND(p99_ms, 3) AS \"p99 (ms)\", started_at AS run_at FROM latest ORDER BY 2 ASC",
           "refId": "A"
         }
       ],
-      "title": "Random Access P50",
-      "type": "bargauge"
+      "title": "Latest Random Access Percentiles",
+      "type": "table"
     },
     {
       "datasource": {

@@ -391,3 +391,53 @@ def fetch_run_bundle(
             )
             snapshots = [dict(row) for row in cursor.fetchall()]
     return dict(run), spans, snapshots
+
+
+def fetch_latest_span_rows(settings: PostgresSettings) -> list[dict[str, object]]:
+    with psycopg.connect(settings.dsn, row_factory=dict_row) as connection:
+        with connection.cursor() as cursor:
+            ensure_schema(connection)
+            cursor.execute(
+                """
+                WITH ranked AS (
+                    SELECT
+                        s.run_id,
+                        s.stage,
+                        s.backend,
+                        s.pattern,
+                        s.status,
+                        s.started_at,
+                        s.ended_at,
+                        s.elapsed_sec,
+                        s.sample_count,
+                        s.metrics,
+                        s.metadata,
+                        s.error,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY s.backend, s.pattern
+                            ORDER BY s.started_at DESC, s.id DESC
+                        ) AS rn
+                    FROM telemetry_spans s
+                    JOIN telemetry_runs r ON r.run_id = s.run_id
+                    WHERE s.status = 'ok'
+                      AND r.status = 'ok'
+                )
+                SELECT
+                    run_id,
+                    stage,
+                    backend,
+                    pattern,
+                    status,
+                    started_at,
+                    ended_at,
+                    elapsed_sec,
+                    sample_count,
+                    metrics,
+                    metadata,
+                    error
+                FROM ranked
+                WHERE rn = 1
+                ORDER BY started_at DESC, backend, pattern
+                """
+            )
+            return [dict(row) for row in cursor.fetchall()]

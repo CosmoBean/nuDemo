@@ -120,26 +120,24 @@
       "gridPos": { "h": 9, "w": 8, "x": 8, "y": 14 },
       "id": 3,
       "options": {
-        "displayMode": "gradient", "minVizHeight": 10, "minVizWidth": 0,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
         "orientation": "horizontal",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "showUnfilled": true
+        "showValue": "auto",
+        "stacking": "none",
+        "tooltip": { "mode": "single", "sort": "none" },
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0
       },
       "targets": [
         {
           "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
           "format": "table",
-          "rawSql": "SELECT backend, MIN((metrics->>'latency_p50_ms')::float) AS \"Random p50 (ms)\" FROM telemetry_spans WHERE pattern = 'random_access' AND status = 'ok' AND backend != 'Redis' AND (metrics->>'latency_p50_ms') IS NOT NULL GROUP BY backend ORDER BY 2 ASC",
+          "rawSql": "SELECT backend, MIN((metrics->>'latency_p50_ms')::float) AS \"p50 (ms)\", MIN((metrics->>'latency_p95_ms')::float) AS \"p95 (ms)\", MIN((metrics->>'latency_p99_ms')::float) AS \"p99 (ms)\" FROM telemetry_spans WHERE pattern = 'random_access' AND status = 'ok' AND backend != 'Redis' AND (metrics->>'latency_p50_ms') IS NOT NULL GROUP BY backend ORDER BY 2 ASC",
           "refId": "A"
         }
       ],
-      "title": "Random Access p50 (ms, lower = better)",
-      "transformations": [
-        { "id": "groupingToMatrix",
-          "options": { "columnField": "backend", "rowField": "backend", "valueField": "Random p50 (ms)" }
-        }
-      ],
-      "type": "bargauge"
+      "title": "Random Access Percentiles (ms, lower = better)",
+      "type": "barchart"
     },
     {
       "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
@@ -346,6 +344,6 @@
   "timezone": "browser",
   "title": "nuDemo — Backend Comparison",
   "uid": "nudemo-backend-comparison",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

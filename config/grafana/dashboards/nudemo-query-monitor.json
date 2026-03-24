@@ -154,33 +154,36 @@
       "type": "bargauge"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
       "fieldConfig": {
-        "defaults": { "unit": "ms", "min": 0,
-          "color": { "mode": "palette-classic" },
-          "custom": { "fillOpacity": 80 }
-        },
-        "overrides": []
+        "defaults": {},
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "backend" },
+            "properties": [{ "id": "displayName", "value": "Backend" }] },
+          { "matcher": { "id": "byName", "options": "p50 (ms)" },
+            "properties": [{ "id": "unit", "value": "ms" }] },
+          { "matcher": { "id": "byName", "options": "p95 (ms)" },
+            "properties": [{ "id": "unit", "value": "ms" }] },
+          { "matcher": { "id": "byName", "options": "p99 (ms)" },
+            "properties": [{ "id": "unit", "value": "ms" }] },
+          { "matcher": { "id": "byName", "options": "run_at" },
+            "properties": [{ "id": "unit", "value": "dateTimeAsLocal" }] }
+        ]
       },
       "gridPos": { "h": 9, "w": 8, "x": 8, "y": 8 },
       "id": 6,
-      "options": { "displayMode": "gradient", "minVizHeight": 10, "minVizWidth": 0,
-        "orientation": "horizontal",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "showUnfilled": true },
+      "options": { "footer": { "show": false }, "showHeader": true,
+        "sortBy": [{ "desc": false, "displayName": "p50 (ms)" }] },
       "targets": [
-        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
-          "expr": "nudemo_latest_span_metric_value{pattern=\"random_access\",metric_name=\"latency_p50_ms\",status=\"ok\"}",
-          "instant": true, "legendFormat": "{{backend}} p50", "refId": "A" },
-        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
-          "expr": "nudemo_latest_span_metric_value{pattern=\"random_access\",metric_name=\"latency_p95_ms\",status=\"ok\"}",
-          "instant": true, "legendFormat": "{{backend}} p95", "refId": "B" },
-        { "datasource": { "type": "prometheus", "uid": "Prometheus" },
-          "expr": "nudemo_latest_span_metric_value{pattern=\"random_access\",metric_name=\"latency_p99_ms\",status=\"ok\"}",
-          "instant": true, "legendFormat": "{{backend}} p99", "refId": "C" }
+        {
+          "datasource": { "type": "postgres", "uid": "nudemo-postgres" },
+          "format": "table",
+          "rawSql": "WITH latest AS (SELECT DISTINCT ON (backend) backend, started_at, (metrics->>'latency_p50_ms')::numeric AS p50_ms, (metrics->>'latency_p95_ms')::numeric AS p95_ms, (metrics->>'latency_p99_ms')::numeric AS p99_ms FROM telemetry_spans WHERE pattern = 'random_access' AND status = 'ok' AND (metrics->>'latency_p50_ms') IS NOT NULL ORDER BY backend, started_at DESC) SELECT backend, ROUND(p50_ms, 3) AS \"p50 (ms)\", ROUND(p95_ms, 3) AS \"p95 (ms)\", ROUND(p99_ms, 3) AS \"p99 (ms)\", started_at AS run_at FROM latest ORDER BY 2 ASC",
+          "refId": "A"
+        }
       ],
-      "title": "Random Access — p50 / p95 / p99 (ms, lower = faster)",
-      "type": "bargauge"
+      "title": "Random Access Percentiles (ms, lower = faster)",
+      "type": "table"
     },
     {
       "datasource": { "type": "prometheus", "uid": "Prometheus" },
@@ -327,6 +330,6 @@
   "timezone": "browser",
   "title": "nuDemo — Query Latency Monitor",
   "uid": "nudemo-query-monitor",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

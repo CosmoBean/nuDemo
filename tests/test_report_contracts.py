@@ -85,6 +85,9 @@ class ReportContractTests(unittest.TestCase):
         self.assertTrue(
             any(attributes["backend"] == result.backend for _, attributes in span_measurements)
         )
+        self.assertTrue(
+            all(attributes["run_id"] == str(report.dataset["run_id"]) for _, attributes in span_measurements)
+        )
 
         service_measurements = build_service_measurements(
             str(report.dataset["run_id"]),
@@ -113,6 +116,37 @@ class ReportContractTests(unittest.TestCase):
                 for _, attributes in service_measurements
             )
         )
+
+    def test_span_measurements_preserve_span_run_ids(self) -> None:
+        measurements = build_span_measurements(
+            "fallback-run",
+            [
+                {
+                    "run_id": "run-a",
+                    "stage": "storage",
+                    "backend": "Lance",
+                    "pattern": "random_access",
+                    "status": "ok",
+                    "elapsed_sec": 0.12,
+                    "sample_count": 128,
+                    "metrics": {"latency_p50_ms": 1.25, "latency_p95_ms": 2.75},
+                },
+                {
+                    "run_id": "run-b",
+                    "stage": "storage",
+                    "backend": "Parquet",
+                    "pattern": "random_access",
+                    "status": "ok",
+                    "elapsed_sec": 0.24,
+                    "sample_count": 128,
+                    "metrics": {"latency_p50_ms": 12.5, "latency_p95_ms": 18.75},
+                },
+            ],
+        )
+
+        run_ids = {attrs["backend"]: attrs["run_id"] for _, attrs in measurements if attrs["metric_name"] == "latency_p50_ms"}
+        self.assertEqual(run_ids["Lance"], "run-a")
+        self.assertEqual(run_ids["Parquet"], "run-b")
 
 
 if __name__ == "__main__":

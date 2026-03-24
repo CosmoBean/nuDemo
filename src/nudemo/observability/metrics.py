@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import FastAPI, Request, Response
 
 from nudemo.config import PostgresSettings
-from nudemo.telemetry.store import fetch_run_bundle
+from nudemo.telemetry.store import fetch_latest_span_rows, fetch_run_bundle
 
 _START_LOCK = threading.Lock()
 _EXPORTER_STARTED = False
@@ -20,6 +20,7 @@ _METER = None
 class CachedTelemetryBundle:
     run: dict[str, Any]
     spans: list[dict[str, Any]]
+    latest_spans: list[dict[str, Any]]
     snapshots: list[dict[str, Any]]
     loaded_at: float
 
@@ -38,11 +39,13 @@ class TelemetrySnapshotCache:
                 return self._bundle
             try:
                 run, spans, snapshots = fetch_run_bundle(self._settings)
+                latest_spans = fetch_latest_span_rows(self._settings)
             except Exception:
                 return self._bundle
             self._bundle = CachedTelemetryBundle(
                 run=run,
                 spans=spans,
+                latest_spans=latest_spans,
                 snapshots=snapshots,
                 loaded_at=now,
             )
@@ -78,7 +81,7 @@ def build_span_measurements(
     measurements: list[tuple[float, dict[str, str]]] = []
     for span in spans:
         attrs = {
-            "run_id": run_id,
+            "run_id": str(span.get("run_id", run_id)),
             "stage": str(span.get("stage", "unknown")),
             "backend": str(span.get("backend", "unknown")),
             "pattern": str(span.get("pattern", "unknown")),
@@ -196,10 +199,12 @@ def ensure_metrics_exporter(settings: PostgresSettings) -> None:
             bundle = cache.latest()
             if bundle is None:
                 return []
-            run_id = str(bundle.run.get("run_id", "unknown"))
             return [
                 Observation(value, attributes=attributes)
-                for value, attributes in build_span_measurements(run_id, bundle.spans)
+                for value, attributes in build_span_measurements(
+                    str(bundle.run.get("run_id", "unknown")),
+                    bundle.latest_spans,
+                )
             ]
 
         def service_callback(_options):

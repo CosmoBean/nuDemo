@@ -824,7 +824,7 @@ def build_browser_home_html() -> str:
             </div>
             <div class="link-row">
               <span>Grafana observability</span>
-              <a href="/grafana-dashboard">Open</a>
+              <a href="/open-grafana">Open</a>
             </div>
           </div>
         </div>
@@ -850,7 +850,7 @@ def build_browser_home_html() -> str:
         <section class="card">
           <strong>Grafana</strong>
           Stage bottlenecks, service pressure, and fetch latency.
-          <a href="/grafana-dashboard">Open</a>
+          <a href="/open-grafana">Open</a>
         </section>
       </div>
 
@@ -1561,7 +1561,7 @@ def build_explorer_html() -> str:
         <a href="/">Browser home</a>
         <a href="/scene-studio">Scene studio</a>
         <a href="/compare">Compare backends</a>
-        <a href="/grafana-dashboard">Grafana</a>
+        <a href="/open-grafana">Grafana</a>
       </div>
       <div class="shell">
         <aside class="panel sidebar">
@@ -2281,7 +2281,7 @@ def build_scene_studio_html() -> str:
         <a href="/">Browser home</a>
         <a href="/explorer">Explorer</a>
         <a href="/scene-studio">Scene studio</a>
-        <a href="/grafana-dashboard">Grafana</a>
+        <a href="/open-grafana">Grafana</a>
       </div>
 
       <section class="hero">
@@ -2870,7 +2870,7 @@ def build_compare_html() -> str:
         <a href="/">Home</a>
         <a href="/explorer">Explorer</a>
         <a href="/scene-studio">Scene studio</a>
-        <a href="/grafana-dashboard">Grafana</a>
+        <a href="/open-grafana">Grafana</a>
       </nav>
       <div class="pill">Storage Backends</div>
       <h1>Backend Comparison</h1>
@@ -3102,13 +3102,13 @@ def create_app(
     def compare_page() -> str:
         return build_compare_html()
 
-    @app.get("/grafana-dashboard")
+    @app.get("/open-grafana")
     def grafana_dashboard_link(request: Request) -> RedirectResponse:
         host = (request.headers.get("host") or "").split(":", 1)[0].lower()
         if host in {"127.0.0.1", "localhost"}:
-            target = "http://127.0.0.1:3000/grafana/d/nudemo-observability/nudemo-observability"
+            target = "http://127.0.0.1:3000/grafana/dashboards"
         else:
-            target = "/grafana/d/nudemo-observability/nudemo-observability"
+            target = "https://nudemo-browser.cosmobean.dev/grafana/dashboards"
         return RedirectResponse(url=target, status_code=307)
 
     @app.get("/benchmark_dashboard.html", response_class=HTMLResponse)

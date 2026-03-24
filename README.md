@@ -49,7 +49,7 @@ make data-explorer    # http://127.0.0.1:8787
 | `/compare` | Backend comparison — charts and ranked table |
 | `/explorer` | Sample search by scene, location, category, token |
 | `/scene-studio` | 3D LiDAR scrubber per scene |
-| `/grafana-dashboard` | Grafana observability proxy |
+| `/open-grafana` | Grafana dashboards redirect |
 
 Requires the `minio-postgres` backend to be loaded. Grafana at `http://127.0.0.1:3000/grafana/`.
 
