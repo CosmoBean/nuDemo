@@ -105,6 +105,95 @@ class ElasticsearchBackend:
             ],
         }
 
+    def bulk_index_from_postgres(self, postgres_settings, batch_size: int = 500) -> int:
+        """Read all samples + annotations from PostgreSQL and bulk-index them.
+
+        Uses a server-side cursor so the full table never loads into RAM.
+        """
+        import psycopg
+        import psycopg.rows
+
+        sql = """
+            SELECT
+                s.sample_idx,
+                s.token,
+                s.scene_token,
+                sc.scene_name,
+                s.location,
+                s.timestamp,
+                s.num_annotations,
+                COALESCE(
+                    json_agg(
+                        json_build_object(
+                            'category',      a.category,
+                            'num_lidar_pts', a.num_lidar_pts,
+                            'num_radar_pts', a.num_radar_pts,
+                            'size_x',        COALESCE(a.size[1], 0),
+                            'size_y',        COALESCE(a.size[2], 0),
+                            'size_z',        COALESCE(a.size[3], 0)
+                        ) ORDER BY a.id
+                    ) FILTER (WHERE a.id IS NOT NULL),
+                    '[]'::json
+                ) AS annotations
+            FROM samples s
+            JOIN scenes sc ON sc.scene_token = s.scene_token
+            LEFT JOIN annotations a ON a.sample_idx = s.sample_idx
+            GROUP BY s.sample_idx, s.token, s.scene_token, sc.scene_name,
+                     s.location, s.timestamp, s.num_annotations
+            ORDER BY s.sample_idx
+        """
+
+        total = 0
+        batch: list[str] = []
+
+        with psycopg.connect(postgres_settings.dsn, row_factory=psycopg.rows.dict_row) as conn:
+            with conn.cursor(name="es_index_cursor") as cur:
+                cur.itersize = batch_size
+                cur.execute(sql)
+                for row in cur:
+                    anns = row["annotations"] if isinstance(row["annotations"], list) else []
+                    doc = {
+                        "sample_idx":      row["sample_idx"],
+                        "token":           row["token"],
+                        "scene_token":     row["scene_token"],
+                        "scene_name":      row["scene_name"],
+                        "location":        row["location"],
+                        "timestamp":       int(row["timestamp"]),
+                        "num_annotations": row["num_annotations"],
+                        "annotations": [
+                            {
+                                "category":       a["category"],
+                                "category_text":  a["category"].replace(".", " "),
+                                "category_group": a["category"].split(".")[0],
+                                "num_lidar_pts":  a["num_lidar_pts"] or 0,
+                                "num_radar_pts":  a["num_radar_pts"] or 0,
+                                "size_x":         float(a["size_x"] or 0),
+                                "size_y":         float(a["size_y"] or 0),
+                                "size_z":         float(a["size_z"] or 0),
+                            }
+                            for a in anns
+                        ],
+                    }
+                    batch.append(json.dumps({"index": {"_index": self.index, "_id": str(row["sample_idx"])}}))
+                    batch.append(json.dumps(doc))
+
+                    if len(batch) >= batch_size * 2:
+                        ndjson_body = "\n".join(batch) + "\n"
+                        result = self._req("POST", "/_bulk", ndjson_body, ndjson=True)
+                        if result.get("errors"):
+                            errors = sum(1 for item in result.get("items", []) if "error" in item.get("index", {}))
+                            if errors:
+                                raise RuntimeError(f"{errors} bulk index errors")
+                        total += len(batch) // 2
+                        batch = []
+
+        if batch:
+            ndjson_body = "\n".join(batch) + "\n"
+            result = self._req("POST", "/_bulk", ndjson_body, ndjson=True)
+            total += len(batch) // 2
+
+        return total
+
     def bulk_index(self, samples_with_idx: list[tuple]) -> int:
         """Bulk index a batch of (sample, sample_idx) pairs. Returns count indexed."""
         lines: list[str] = []
@@ -178,7 +267,7 @@ class ElasticsearchBackend:
             "from": from_,
             "size": size,
             "sort": [{"_score": "desc"}, {"sample_idx": "asc"}],
-            "_source": ["sample_idx", "token", "scene_name", "location", "num_annotations", "annotations.category"],
+            "_source": ["sample_idx", "token", "scene_token", "scene_name", "location", "num_annotations", "annotations.category"],
             "aggs": {
                 "top_categories": {
                     "nested": {"path": "annotations"},
@@ -187,6 +276,14 @@ class ElasticsearchBackend:
                     },
                 },
                 "locations": {"terms": {"field": "location", "size": 20}},
+                "scenes": {
+                    "terms": {"field": "scene_token", "size": 50},
+                    "aggs": {
+                        "scene_name": {"terms": {"field": "scene_name", "size": 1}},
+                        "location":   {"terms": {"field": "location",   "size": 1}},
+                        "top_score":  {"max": {"script": {"source": "_score"}}},
+                    },
+                },
             },
         }
 
@@ -200,6 +297,7 @@ class ElasticsearchBackend:
             hits.append({
                 "sample_idx":     src["sample_idx"],
                 "token":          src.get("token", ""),
+                "scene_token":    src.get("scene_token", ""),
                 "scene_name":     src.get("scene_name", ""),
                 "location":       src.get("location", ""),
                 "num_annotations": src.get("num_annotations", 0),
@@ -210,6 +308,18 @@ class ElasticsearchBackend:
         aggs = result.get("aggregations", {})
         cat_buckets = aggs.get("top_categories", {}).get("cats", {}).get("buckets", [])
         loc_buckets = aggs.get("locations", {}).get("buckets", [])
+        scene_buckets = aggs.get("scenes", {}).get("buckets", [])
+
+        scenes = []
+        for b in scene_buckets:
+            name_buckets = b.get("scene_name", {}).get("buckets", [])
+            loc_buckets_inner = b.get("location", {}).get("buckets", [])
+            scenes.append({
+                "scene_token":  b["key"],
+                "scene_name":   name_buckets[0]["key"] if name_buckets else "",
+                "location":     loc_buckets_inner[0]["key"] if loc_buckets_inner else "",
+                "sample_count": b["doc_count"],
+            })
 
         return {
             "total": hits_raw.get("total", {}).get("value", 0),
@@ -217,6 +327,7 @@ class ElasticsearchBackend:
             "aggs": {
                 "categories": [{"category": b["key"], "count": b["doc_count"]} for b in cat_buckets],
                 "locations":  [{"location": b["key"], "count": b["doc_count"]} for b in loc_buckets],
+                "scenes":     scenes,
             },
         }
 

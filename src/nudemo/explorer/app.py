@@ -1508,6 +1508,7 @@ def build_explorer_html() -> str:
         cursor: pointer;
       }
       .es-facet-btn:hover { background: #1a4a32; }
+      .es-scene-btn { border-color: #544bb0; background: #12101e; color: var(--ink); }
       .es-count {
         opacity: .7;
         margin-left: 3px;
@@ -1986,19 +1987,36 @@ def build_explorer_html() -> str:
           const data = await res.json();
           esStatus.textContent = "";
 
-          esTotalMeta.textContent = `${data.total} sample${data.total !== 1 ? "s" : ""} matched`;
-          esHits.innerHTML = data.hits.length
+          const sceneCount = (data.aggs && data.aggs.scenes && data.aggs.scenes.length) || 0;
+          esTotalMeta.textContent = `${data.total.toLocaleString()} samples across ${sceneCount} scenes`;
+
+          // Scene cards at top
+          const scenes = (data.aggs && data.aggs.scenes) || [];
+          const sceneHtml = scenes.length ? `
+            <div style="margin-bottom:16px">
+              <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:8px">Matching scenes</div>
+              <div class="es-facets">
+                ${scenes.map(s => `
+                  <button class="es-facet-btn es-scene-btn" onclick="esOpenScene(${JSON.stringify(s.scene_token)}, ${JSON.stringify(s.scene_name)})">
+                    ${escapeHtml(s.scene_name)}
+                    <span class="es-count">${s.sample_count} samples</span>
+                    <span style="color:#6b59dd;margin-left:4px;font-size:.65rem">${escapeHtml(s.location)}</span>
+                  </button>`).join("")}
+              </div>
+            </div>` : "";
+
+          esHits.innerHTML = sceneHtml + (data.hits.length
             ? data.hits.map(h => `
               <div class="card sample-card es-hit" onclick="loadDetail(${h.sample_idx})">
                 <img loading="lazy" src="/api/samples/${h.sample_idx}/cameras/CAM_FRONT" alt="sample ${h.sample_idx}">
                 <div class="body">
-                  <div class="es-score">relevance ${h.score.toFixed(2)}</div>
+                  <div class="es-score">score ${h.score.toFixed(2)}</div>
                   <h3>#${h.sample_idx} &middot; ${escapeHtml(h.scene_name)}</h3>
                   <div style="font-size:.82rem;color:var(--muted)">${escapeHtml(h.location)} &middot; ${h.num_annotations} annotations</div>
                   <div class="es-cats">${h.categories.slice(0, 4).map(c => `<span class="es-cat">${escapeHtml(c)}</span>`).join("")}</div>
                 </div>
               </div>`).join("")
-            : `<p style="color:var(--muted)">No results for "${escapeHtml(q)}".</p>`;
+            : `<p style="color:var(--muted)">No results for "${escapeHtml(q)}".</p>`);
 
           const cats = (data.aggs && data.aggs.categories) || [];
           esFacets.innerHTML = cats.length
@@ -2021,6 +2039,10 @@ def build_explorer_html() -> str:
       function esSetQ(term) {
         esQ.value = term;
         runEsSearch();
+      }
+
+      function esOpenScene(sceneToken, sceneName) {
+        window.open(`/scene-studio?scene_token=${encodeURIComponent(sceneToken)}`, "_blank");
       }
 
       esGo.addEventListener("click", runEsSearch);
