@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -31,6 +32,10 @@ RADAR_PATH_COLUMNS = {
 
 LIDAR_PATH_COLUMN = "lidar_top_path"
 VECTOR_FIELDS = ("image_vec", "lidar_vec", "radar_vec", "metadata_vec", "fused_vec")
+_QUERY_TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
+_CATEGORY_GROUPS = {"human", "vehicle", "movable_object", "static_object"}
+_HEX_IDENTIFIER_PATTERN = re.compile(r"^[0-9a-f]{6,32}$", re.IGNORECASE)
+_SCENE_IDENTIFIER_PATTERN = re.compile(r"^scene-\d{1,4}$", re.IGNORECASE)
 
 _INDEX_MAPPING: dict[str, Any] = {
     "mappings": {
@@ -74,6 +79,36 @@ _INDEX_MAPPING: dict[str, Any] = {
 
 def _escape_wildcard_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
+
+
+def _query_tokens(value: str) -> set[str]:
+    return {token for token in _QUERY_TOKEN_PATTERN.findall(value.lower()) if token}
+
+
+def _looks_like_identifier_query(value: str) -> bool:
+    normalized = value.strip()
+    return bool(
+        _HEX_IDENTIFIER_PATTERN.fullmatch(normalized)
+        or _SCENE_IDENTIFIER_PATTERN.fullmatch(normalized)
+    )
+
+
+def _looks_structured_category_query(value: str) -> bool:
+    return "." in value or "_" in value
+
+
+def _category_aliases(value: str) -> list[str]:
+    tokens = _query_tokens(value)
+    aliases: set[str] = set()
+    if tokens & {"person", "people", "human", "pedestrian"}:
+        aliases.add("human.pedestrian")
+    if tokens & {"man", "woman", "adult"}:
+        aliases.add("human.pedestrian.adult")
+    if tokens & {"child", "kid"}:
+        aliases.add("human.pedestrian.child")
+    if tokens & {"worker", "construction"}:
+        aliases.add("human.pedestrian.construction_worker")
+    return sorted(aliases)
 
 
 def _build_annotation_document(annotations: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -510,6 +545,84 @@ class ElasticsearchBackend:
 
         if normalized_q:
             wildcard_q = _escape_wildcard_value(normalized_q)
+            annotation_query = normalized_q.replace(".", " ").replace("_", " ").strip()
+            alias_categories = _category_aliases(normalized_q)
+            match_query: dict[str, Any] = {
+                "query": annotation_query,
+                "operator": "AND",
+                "boost": 4.0,
+            }
+            if len(annotation_query) >= 5:
+                match_query["fuzziness"] = "AUTO"
+            annotation_should: list[dict[str, Any]] = [
+                {
+                    "match": {
+                        "annotations.category_text": match_query
+                    }
+                },
+                {
+                    "term": {
+                        "annotations.category": {
+                            "value": normalized_q.lower(),
+                            "boost": 10.0,
+                        }
+                    }
+                },
+            ]
+            lowered_q = normalized_q.lower()
+            if lowered_q in _CATEGORY_GROUPS:
+                annotation_should.append(
+                    {
+                        "term": {
+                            "annotations.category_group": {
+                                "value": lowered_q,
+                                "boost": 8.0,
+                            }
+                        }
+                    }
+                )
+            if _looks_structured_category_query(normalized_q):
+                annotation_should.append(
+                    {
+                        "prefix": {
+                            "annotations.category": {
+                                "value": normalized_q.lower(),
+                                "boost": 8.0,
+                            }
+                        }
+                    }
+                )
+                annotation_should.append(
+                    {
+                        "match_phrase_prefix": {
+                            "annotations.category_text": {
+                                "query": annotation_query,
+                                "boost": 6.0,
+                            }
+                        }
+                    }
+                )
+            for alias in alias_categories:
+                annotation_should.append(
+                    {
+                        "prefix": {
+                            "annotations.category": {
+                                "value": alias,
+                                "boost": 8.0,
+                            }
+                        }
+                    }
+                )
+                annotation_should.append(
+                    {
+                        "match_phrase": {
+                            "annotations.category_text": {
+                                "query": alias.replace(".", " "),
+                                "boost": 6.0,
+                            }
+                        }
+                    }
+                )
             should: list[dict[str, Any]] = [
                 {"term": {"scene_name": {"value": normalized_q, "boost": 8.0}}},
                 {
@@ -538,39 +651,14 @@ class ElasticsearchBackend:
                         "score_mode": "max",
                         "query": {
                             "bool": {
-                                "should": [
-                                    {
-                                        "wildcard": {
-                                            "annotations.category": {
-                                                "value": f"*{wildcard_q}*",
-                                                "case_insensitive": True,
-                                            }
-                                        }
-                                    },
-                                    {
-                                        "wildcard": {
-                                            "annotations.category_group": {
-                                                "value": f"*{wildcard_q}*",
-                                                "case_insensitive": True,
-                                            }
-                                        }
-                                    },
-                                    {
-                                        "match": {
-                                            "annotations.category_text": {
-                                                "query": normalized_q,
-                                                "fuzziness": "AUTO",
-                                            }
-                                        }
-                                    },
-                                ],
+                                "should": annotation_should,
                                 "minimum_should_match": 1,
                             }
                         },
                     }
                 },
             ]
-            if len(normalized_q) >= 6:
+            if len(normalized_q) >= 6 or _looks_like_identifier_query(normalized_q):
                 should.extend(
                     [
                         {

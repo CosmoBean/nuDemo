@@ -1,3 +1,5 @@
+import json
+
 from nudemo.explorer.app import build_explorer_html
 from nudemo.storage.elasticsearch_store import ElasticsearchBackend
 
@@ -79,3 +81,60 @@ def test_elasticsearch_search_supports_scene_and_token_lookups(monkeypatch) -> N
             }
         }
     } in should
+
+
+def test_elasticsearch_search_avoids_annotation_substring_wildcards_for_short_terms(monkeypatch) -> None:
+    backend = ElasticsearchBackend(url="http://example.invalid")
+    captured: dict[str, object] = {}
+
+    def fake_req(self, method: str, path: str, body=None, *, ndjson: bool = False):
+        captured["body"] = body
+        return {
+            "hits": {"total": {"value": 0}, "hits": []},
+            "aggregations": {
+                "top_categories": {"cats": {"buckets": []}},
+                "locations": {"buckets": []},
+                "scenes": {"buckets": []},
+            },
+        }
+
+    monkeypatch.setattr(ElasticsearchBackend, "_req", fake_req)
+
+    backend.search(q="man", size=8, from_=0)
+
+    body = captured["body"]
+    assert isinstance(body, dict)
+    nested_query = body["query"]["bool"]["must"][0]["bool"]["should"][-1]["nested"]["query"]["bool"]["should"]
+    assert not any(
+        "wildcard" in clause and "annotations.category" in clause["wildcard"]
+        for clause in nested_query
+    )
+    assert any("match" in clause for clause in nested_query)
+
+
+def test_elasticsearch_search_adds_human_aliases_without_group_wildcard(monkeypatch) -> None:
+    backend = ElasticsearchBackend(url="http://example.invalid")
+    captured: dict[str, object] = {}
+
+    def fake_req(self, method: str, path: str, body=None, *, ndjson: bool = False):
+        captured["method"] = method
+        captured["path"] = path
+        captured["body"] = body
+        return {
+            "hits": {"total": {"value": 0}, "hits": []},
+            "aggregations": {
+                "top_categories": {"cats": {"buckets": []}},
+                "locations": {"buckets": []},
+                "scenes": {"buckets": []},
+            },
+        }
+
+    monkeypatch.setattr(ElasticsearchBackend, "_req", fake_req)
+
+    backend.search(q="a man", size=12)
+
+    body = captured["body"]
+    assert isinstance(body, dict)
+    serialized = json.dumps(body)
+    assert '"annotations.category_group"' not in serialized or '"*a man*"' not in serialized
+    assert "human.pedestrian.adult" in serialized

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 
 import numpy as np
@@ -36,6 +37,9 @@ RADAR_PATH_COLUMNS = {
 }
 
 LIDAR_PATH_COLUMN = "lidar_top_path"
+SEMANTIC_MATCH_FLOOR = 0.34
+_HEX_IDENTIFIER_PATTERN = re.compile(r"^[0-9a-f]{6,32}$", re.IGNORECASE)
+_SCENE_IDENTIFIER_PATTERN = re.compile(r"^scene-\d{1,4}$", re.IGNORECASE)
 
 
 class MiningSearchService:
@@ -144,6 +148,7 @@ class MiningSearchService:
         negative_sample_ids = [int(value) for value in (negative_sample_ids or [])]
         weights = normalize_modality_weights(modality_weights)
         normalized_q = q.strip()
+        identifier_query = _looks_like_identifier_query(normalized_q)
 
         candidate_size = max(40, min(200, (from_ + size) * 4))
         lexical_payload = self._es.search(
@@ -155,9 +160,17 @@ class MiningSearchService:
             size=candidate_size,
             from_=0,
         )
+        lexical_hits = list(lexical_payload.get("hits", []))
+        exact_hit_ids = {
+            int(hit["sample_idx"])
+            for hit in lexical_hits
+            if _is_exact_query_hit(hit, normalized_q)
+        }
+        if exact_hit_ids:
+            lexical_hits = [hit for hit in lexical_hits if int(hit["sample_idx"]) in exact_hit_ids]
 
         search_vector = None
-        if normalized_q:
+        if normalized_q and mode != "lexical" and not exact_hit_ids:
             search_vector = self._encoder.encode_text(normalized_q)
 
         example_docs = self._es.fetch_documents(
@@ -177,7 +190,13 @@ class MiningSearchService:
             search_vector = positive_centroid
 
         vector_payload = {"hits": []}
-        if search_vector is not None:
+        should_use_vector_search = (
+            search_vector is not None
+            and mode != "lexical"
+            and not exact_hit_ids
+            and not (identifier_query and lexical_hits and not positive_sample_ids and not negative_sample_ids)
+        )
+        if should_use_vector_search:
             vector_payload = self._es.vector_search(
                 query_vector=search_vector,
                 scene_token=scene_token,
@@ -187,11 +206,21 @@ class MiningSearchService:
                 size=candidate_size,
             )
 
-        lexical_ranks = {int(hit["sample_idx"]): idx for idx, hit in enumerate(lexical_payload.get("hits", []))}
+        lexical_scores = {
+            int(hit["sample_idx"]): float(hit.get("score") or 0.0)
+            for hit in lexical_hits
+        }
+        max_lexical_score = max(lexical_scores.values(), default=0.0)
         vector_ranks = {int(hit["sample_idx"]): idx for idx, hit in enumerate(vector_payload.get("hits", []))}
         candidate_ids = []
         seen: set[int] = set()
-        for hit in lexical_payload.get("hits", []) + vector_payload.get("hits", []):
+        if mode == "lexical" or (
+            identifier_query and lexical_hits and not positive_sample_ids and not negative_sample_ids
+        ):
+            candidate_sources = lexical_hits
+        else:
+            candidate_sources = lexical_hits + vector_payload.get("hits", [])
+        for hit in candidate_sources:
             sample_idx = int(hit["sample_idx"])
             if sample_idx in seen:
                 continue
@@ -202,7 +231,10 @@ class MiningSearchService:
         ranked_hits: list[dict[str, object]] = []
         for doc in documents:
             sample_idx = int(doc["sample_idx"])
-            lexical_component = _rrf(lexical_ranks.get(sample_idx))
+            lexical_component = _normalized_score(
+                lexical_scores.get(sample_idx, 0.0),
+                max_lexical_score,
+            )
             vector_component = _rrf(vector_ranks.get(sample_idx))
             image_component = _cosine(search_vector, _vector_from_doc(doc, "image_vec")) if search_vector is not None else 0.0
             lidar_component = _cosine(search_vector, _vector_from_doc(doc, "lidar_vec")) if search_vector is not None else 0.0
@@ -211,17 +243,32 @@ class MiningSearchService:
             fused_component = _cosine(search_vector, _vector_from_doc(doc, "fused_vec")) if search_vector is not None else 0.0
             positive_component = _cosine(positive_centroid, _vector_from_doc(doc, "fused_vec")) if positive_centroid is not None else 0.0
             negative_component = _cosine(negative_centroid, _vector_from_doc(doc, "fused_vec")) if negative_centroid is not None else 0.0
-            total = (
-                (weights["lexical"] * lexical_component)
-                + (weights["fused"] * max(fused_component, 0.0))
-                + (weights["image"] * max(image_component, 0.0))
-                + (weights["lidar"] * max(lidar_component, 0.0))
-                + (weights["radar"] * max(radar_component, 0.0))
-                + (weights["metadata"] * max(metadata_component, 0.0))
-                + (weights["positive"] * max(positive_component, 0.0))
-                - (weights["negative"] * max(negative_component, 0.0))
-                + (0.1 * vector_component)
+            semantic_component = _semantic_score(
+                fused_component=max(fused_component, 0.0),
+                image_component=max(image_component, 0.0),
+                lidar_component=max(lidar_component, 0.0),
+                radar_component=max(radar_component, 0.0),
+                metadata_component=max(metadata_component, 0.0),
+                weights=weights,
+                allow_metadata=bool(lexical_hits),
             )
+            if (
+                normalized_q
+                and int(lexical_payload.get("total") or 0) == 0
+                and positive_centroid is None
+                and not _passes_semantic_floor(semantic_component)
+            ):
+                continue
+            example_adjustment = (
+                (0.25 * min(weights["positive"], 1.0) * max(positive_component, 0.0))
+                - (0.20 * min(weights["negative"], 1.0) * max(negative_component, 0.0))
+            )
+            if mode == "lexical" or exact_hit_ids:
+                total = lexical_component
+            elif lexical_hits:
+                total = (0.7 * lexical_component) + (0.3 * semantic_component) + example_adjustment
+            else:
+                total = semantic_component + example_adjustment + (0.05 * vector_component)
             categories = sorted({annotation["category"] for annotation in doc.get("annotations", [])})
             breakdown = {
                 "lexical": round(lexical_component, 4),
@@ -235,6 +282,7 @@ class MiningSearchService:
             }
             dominant_signal = max(
                 ("lexical", lexical_component),
+                ("fused", fused_component),
                 ("image", image_component),
                 ("lidar", lidar_component),
                 ("radar", radar_component),
@@ -252,6 +300,7 @@ class MiningSearchService:
                     "num_annotations": int(doc.get("num_annotations", 0)),
                     "categories": categories,
                     "score": round(total, 6),
+                    "semantic_score": round(semantic_component, 6),
                     "score_breakdown": breakdown,
                     "dominant_signal": dominant_signal,
                 }
@@ -399,6 +448,58 @@ def _rrf(rank: int | None, k: int = 60) -> float:
     if rank is None:
         return 0.0
     return 1.0 / (k + rank + 1)
+
+
+def _normalized_score(score: float, max_score: float) -> float:
+    if score <= 0 or max_score <= 0:
+        return 0.0
+    return min(score / max_score, 1.0)
+
+
+def _semantic_score(
+    *,
+    fused_component: float,
+    image_component: float,
+    lidar_component: float,
+    radar_component: float,
+    metadata_component: float,
+    weights: dict[str, float],
+    allow_metadata: bool,
+) -> float:
+    weighted_terms = [
+        (weights["fused"], fused_component),
+        (weights["image"], image_component),
+        (weights["lidar"], lidar_component),
+        (weights["radar"], radar_component),
+    ]
+    if allow_metadata:
+        weighted_terms.append((weights["metadata"], metadata_component))
+    total_weight = sum(weight for weight, _value in weighted_terms if weight > 0)
+    if total_weight <= 0:
+        return 0.0
+    return sum(weight * value for weight, value in weighted_terms if weight > 0) / total_weight
+
+
+def _looks_like_identifier_query(value: str) -> bool:
+    normalized = value.strip()
+    return bool(
+        _HEX_IDENTIFIER_PATTERN.fullmatch(normalized)
+        or _SCENE_IDENTIFIER_PATTERN.fullmatch(normalized)
+    )
+
+
+def _is_exact_query_hit(hit: dict[str, object], query: str) -> bool:
+    if not query:
+        return False
+    lowered = query.casefold()
+    return any(
+        str(hit.get(field) or "").casefold() == lowered
+        for field in ("scene_name", "scene_token", "token")
+    )
+
+
+def _passes_semantic_floor(semantic_component: float) -> bool:
+    return semantic_component >= SEMANTIC_MATCH_FLOOR
 
 
 def _aggregate_hits(hits: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
