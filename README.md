@@ -28,6 +28,9 @@ All numbers are wall-clock measurements from real runs on this host, not synthet
 # Start Docker services (Kafka, MinIO, PostgreSQL, Redis, Prometheus, Grafana)
 make infra-up
 
+# Load the searchable multimodal index from the already-ingested MinIO+PostgreSQL corpus
+make multimodal-index BATCH_SIZE=24
+
 # Download nuScenes v1.0-trainval (~42 GB keyframes)
 make download-trainval
 
@@ -40,31 +43,39 @@ Budget ~2.5 hours per blob backend on this host. Running all five sequentially t
 ## Browser UI
 
 ```bash
-make data-explorer    # http://127.0.0.1:8787
+make data-explorer    # http://127.0.0.1:8788
 ```
 
 | Route | What |
 |---|---|
 | `/` | Home — links to all views |
 | `/compare` | Backend comparison — charts and ranked table |
-| `/explorer` | Sample search by scene, location, category, token |
+| `/explorer` | Unified lexical + multimodal sample search, mining sessions, saved cohorts |
 | `/scene-studio` | 3D LiDAR scrubber per scene |
 | `/open-grafana` | Grafana dashboards redirect |
 
-Requires the `minio-postgres` backend to be loaded. Grafana at `http://127.0.0.1:3000/grafana/`.
+Requires the `minio-postgres` backend to be loaded. Multimodal search requires `make multimodal-index` after ingest. Grafana at `http://127.0.0.1:3000/grafana/`.
 
 ## Architecture
 
 ```
-nuScenes → Extraction → Storage (swappable) → Workloads
-                  ↓
-           Kafka refined topic (metadata-only, async)
-                  ↓
-                Redis (cache warmup during ingest)
+nuScenes → Extraction → Storage backends (swappable) → Benchmarks / Explorer
+                  ↓                         ↓
+           Kafka refined topic        MinIO + PostgreSQL
+                  ↓                         ↓
+                Redis cache       Multimodal index → Elasticsearch
+                                             ↓
+                               Explorer search / mining / cohorts
 ```
 
 Hot write path: Extraction → direct write to backend (35–37 s/s for Lance/Parquet/WebDataset).
 Kafka full-payload consume measured at ~3.4 msg/s — not in the write path.
+
+Multimodal search path:
+- `make storage-minio-postgres ...` loads the full-fidelity browser corpus.
+- `make multimodal-index` builds one Elasticsearch document per sample with lexical fields plus image, LiDAR, radar, metadata, and fused vectors.
+- `/explorer` keeps one search bar. The backend transparently upgrades text search into hybrid retrieval and lets you steer with positive and negative examples.
+- Mining sessions and saved cohorts live in PostgreSQL.
 
 ## Stack
 
@@ -74,6 +85,7 @@ Kafka full-payload consume measured at ~3.4 msg/s — not in the write path.
 | PostgreSQL | Sample metadata, annotations, telemetry history |
 | Redis | Metadata index, embedding cache |
 | Kafka | Async metadata bus (refined topic → Redis warmup) |
+| Elasticsearch | Lexical + multimodal retrieval index for Explorer mining |
 | Prometheus | Scrapes `:9464` — run metrics, span metrics, service pressure |
 | Grafana | Backend comparison, query latency monitor, stage summary |
 

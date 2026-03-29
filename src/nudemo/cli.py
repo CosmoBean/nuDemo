@@ -614,7 +614,10 @@ def command_es_index(args: argparse.Namespace) -> int:
 
     if not es.is_available():
         print(f"ERROR: Elasticsearch not reachable at {config.services.elasticsearch.url}")
-        print("Start it with: make infra-up  (or docker compose -f config/docker-compose.yml up -d elasticsearch)")
+        print(
+            "Start it with: make infra-up  "
+            "(or docker compose -f config/docker-compose.yml up -d elasticsearch)"
+        )
         return 1
 
     print(f"Resetting index '{es.index}'...")
@@ -626,7 +629,9 @@ def command_es_index(args: argparse.Namespace) -> int:
     else:
         batch: list[tuple] = []
         total = 0
-        for idx, sample in enumerate(_iter_samples(config, args.provider, args.limit, args.scene_limit)):
+        for idx, sample in enumerate(
+            _iter_samples(config, args.provider, args.limit, args.scene_limit)
+        ):
             batch.append((sample, idx))
             if len(batch) >= args.batch_size:
                 total += es.bulk_index(batch)
@@ -636,6 +641,31 @@ def command_es_index(args: argparse.Namespace) -> int:
             total += es.bulk_index(batch)
 
     print(f"Done: {total} samples indexed into '{es.index}' at {config.services.elasticsearch.url}")
+    return 0
+
+
+def command_multimodal_index(args: argparse.Namespace) -> int:
+    from nudemo.mining import MiningSearchService
+    from nudemo.storage.elasticsearch_store import ElasticsearchBackend
+
+    config = AppConfig.load(args.config)
+    es = ElasticsearchBackend(url=config.services.elasticsearch.url)
+    if not es.is_available():
+        print(f"ERROR: Elasticsearch not reachable at {config.services.elasticsearch.url}")
+        print(
+            "Start it with: make deps  "
+            "(or docker compose -f config/docker-compose.yml up -d elasticsearch)"
+        )
+        return 1
+
+    service = MiningSearchService(config, es_backend=es)
+    result = service.index_loaded_samples(
+        rebuild=not args.append,
+        batch_size=args.batch_size,
+        limit=args.limit,
+        scene_limit=args.scene_limit,
+    )
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -749,17 +779,46 @@ def build_parser() -> argparse.ArgumentParser:
     render_scene.add_argument("--output", default=None)
     render_scene.set_defaults(func=command_render_scene)
 
-    es_index = subparsers.add_parser("es-index", help="Bulk-index annotation data into Elasticsearch")
+    es_index = subparsers.add_parser(
+        "es-index",
+        help="Bulk-index lexical annotation data into Elasticsearch",
+    )
     es_index.add_argument(
         "--source", default="postgres", choices=["postgres", "file"],
-        help="postgres: read all samples from PostgreSQL (default); file: re-extract from dataset files",
+        help=(
+            "postgres: read all samples from PostgreSQL (default); "
+            "file: re-extract from dataset files"
+        ),
     )
-    es_index.add_argument("--provider", default="real", choices=["auto", "real", "synthetic"],
-                          help="Only used when --source=file")
+    es_index.add_argument(
+        "--provider",
+        default="real",
+        choices=["auto", "real", "synthetic"],
+        help="Only used when --source=file",
+    )
     es_index.add_argument("--limit", type=int, default=None, help="Only used when --source=file")
-    es_index.add_argument("--scene-limit", type=int, default=None, help="Only used when --source=file")
+    es_index.add_argument(
+        "--scene-limit",
+        type=int,
+        default=None,
+        help="Only used when --source=file",
+    )
     es_index.add_argument("--batch-size", type=int, default=500)
     es_index.set_defaults(func=command_es_index)
+
+    multimodal_index = subparsers.add_parser(
+        "multimodal-index",
+        help="Build the multimodal Elasticsearch index from loaded PostgreSQL + MinIO samples",
+    )
+    multimodal_index.add_argument("--limit", type=int, default=None)
+    multimodal_index.add_argument("--scene-limit", type=int, default=None)
+    multimodal_index.add_argument("--batch-size", type=int, default=24)
+    multimodal_index.add_argument(
+        "--append",
+        action="store_true",
+        help="Append/update documents instead of rebuilding the index first.",
+    )
+    multimodal_index.set_defaults(func=command_multimodal_index)
 
     telemetry = subparsers.add_parser("telemetry")
     telemetry_sub = telemetry.add_subparsers(dest="telemetry_command", required=True)

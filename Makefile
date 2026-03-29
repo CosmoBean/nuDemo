@@ -68,7 +68,7 @@ endif
 .PHONY: help bootstrap bootstrap-legacy check-env deps doctor cli extract extract-synthetic \
 	kafka kafka-topics kafka-metadata kafka-full storage storage-minio-postgres storage-redis \
 	storage-lance storage-parquet storage-webdataset benchmark-sim benchmark-real dashboard render-sample \
-	render-scene download-trainval download-trainval-full telemetry-runs \
+	render-scene download-trainval download-trainval-full telemetry-runs multimodal-index \
 	telemetry-dashboard reports-index serve-reports data-explorer lint test clean infra-up \
 	infra-down infra-ps infra-logs overnight-study
 
@@ -153,6 +153,9 @@ download-trainval-full: ## Download/extract trainval keyframes plus sweep blobs;
 
 telemetry-runs: ## Show recent telemetry runs stored in PostgreSQL
 	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) telemetry runs --limit $(or $(LIMIT),10)
+
+multimodal-index: ## Build the multimodal Elasticsearch index from loaded samples
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) multimodal-index $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) --batch-size $(or $(BATCH_SIZE),24) $(EXTRA_ARGS)
 
 telemetry-dashboard: ## Render telemetry dashboard from PostgreSQL; optional RUN_ID=<id>
 	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) telemetry dashboard $(if $(RUN_ID),--run-id $(RUN_ID),--latest)

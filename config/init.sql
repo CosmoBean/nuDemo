@@ -45,3 +45,36 @@ CREATE INDEX IF NOT EXISTS idx_samples_num_annotations ON samples(num_annotation
 CREATE INDEX IF NOT EXISTS idx_annotations_category ON annotations(category);
 CREATE INDEX IF NOT EXISTS idx_annotations_sample ON annotations(sample_idx);
 
+CREATE TABLE IF NOT EXISTS mining_sessions (
+    session_id VARCHAR(32) PRIMARY KEY,
+    label TEXT NOT NULL DEFAULT '',
+    query TEXT NOT NULL DEFAULT '',
+    mode VARCHAR(24) NOT NULL DEFAULT 'hybrid',
+    modality_weights JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS mining_session_examples (
+    session_id VARCHAR(32) NOT NULL REFERENCES mining_sessions(session_id) ON DELETE CASCADE,
+    sample_idx INTEGER NOT NULL REFERENCES samples(sample_idx) ON DELETE CASCADE,
+    polarity VARCHAR(16) NOT NULL CHECK (polarity IN ('positive', 'negative')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (session_id, sample_idx)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mining_session_examples_polarity
+    ON mining_session_examples(session_id, polarity);
+
+CREATE TABLE IF NOT EXISTS mining_cohorts (
+    cohort_id VARCHAR(32) PRIMARY KEY,
+    session_id VARCHAR(32) REFERENCES mining_sessions(session_id) ON DELETE SET NULL,
+    name TEXT NOT NULL,
+    query TEXT NOT NULL DEFAULT '',
+    filters JSONB NOT NULL DEFAULT '{}'::jsonb,
+    sample_ids INTEGER[] NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_mining_cohorts_created_at
+    ON mining_cohorts(created_at DESC);

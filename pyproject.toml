@@ -27,6 +27,11 @@ pipeline = [
   "confluent-kafka>=2.13,<3",
   "pylance>=3.0.1,<4",
 ]
+search = [
+  "torch>=2.6,<3",
+  "torchvision>=0.21,<1",
+  "open-clip-torch>=2.32,<3",
+]
 training = [
   "torch>=2.6,<3",
   "torchvision>=0.21,<1",

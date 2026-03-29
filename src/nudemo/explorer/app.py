@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import time
 from html import escape
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -17,6 +18,12 @@ from nudemo.explorer.media import (
     lidar_payload_to_svg,
     process_camera_payload,
 )
+from nudemo.mining import (
+    MODALITY_PRESETS,
+    MiningSearchService,
+    MiningSessionStore,
+    resolve_modality_weights,
+)
 from nudemo.observability import ensure_metrics_exporter, install_http_metrics
 from nudemo.reporting.dashboard import (
     build_comparison_note,
@@ -25,6 +32,8 @@ from nudemo.reporting.dashboard import (
     build_storage_format_rows,
 )
 from nudemo.storage.elasticsearch_store import ElasticsearchBackend
+
+JSON_BODY = Body(default=None)
 
 CAMERA_COLUMN_MAP = {
     "CAM_FRONT": "cam_front_path",
@@ -501,6 +510,26 @@ class BenchmarkReportStore:
             "comparison_note": build_comparison_note(format_rows),
             "storage_formats": format_rows,
         }
+
+
+def _modality_preset_from_weights(weights: dict[str, float] | None) -> str:
+    normalized = resolve_modality_weights(overrides=weights or {})
+    for name, preset_weights in MODALITY_PRESETS.items():
+        if normalized == resolve_modality_weights(overrides=preset_weights):
+            return name
+    return "balanced"
+
+
+def _session_response(payload: dict[str, Any]) -> dict[str, Any]:
+    response = dict(payload)
+    if "positive_count" not in response:
+        response["positive_count"] = len(response.get("positive_sample_ids") or [])
+    if "negative_count" not in response:
+        response["negative_count"] = len(response.get("negative_sample_ids") or [])
+    response["modality_preset"] = _modality_preset_from_weights(
+        response.get("modality_weights") or {}
+    )
+    return response
 
 
 def build_browser_home_html() -> str:
@@ -1256,6 +1285,72 @@ def build_explorer_html() -> str:
         gap: 10px;
         margin-top: 14px;
       }
+      .button-row button {
+        flex: 1 1 0;
+      }
+      .mining-panel {
+        margin-top: 24px;
+        padding-top: 18px;
+        border-top: 2px dashed var(--line);
+      }
+      .subtle-copy {
+        margin-top: 4px;
+        font-size: 0.78rem;
+        line-height: 1.5;
+      }
+      .example-stack {
+        display: grid;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .example-box {
+        border: 3px solid var(--line);
+        border-radius: 16px;
+        padding: 12px;
+        background: #111119;
+        box-shadow: 4px 4px 0 #211b52;
+      }
+      .example-box strong {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--ink);
+      }
+      .example-box .chip-row {
+        margin-top: 0;
+      }
+      .chip.action {
+        cursor: pointer;
+        user-select: none;
+      }
+      .chip.positive {
+        background: #232537;
+      }
+      .chip.negative {
+        background: #2d2030;
+      }
+      .stack-list {
+        list-style: none;
+        padding: 0;
+        margin: 10px 0 0;
+        display: grid;
+        gap: 10px;
+      }
+      .stack-list li {
+        padding: 12px;
+        border: 3px solid var(--line);
+        border-radius: 16px;
+        background: #111119;
+        box-shadow: 4px 4px 0 #211b52;
+      }
+      .stack-list button {
+        margin-top: 10px;
+      }
+      .mining-note {
+        margin-top: 10px;
+        font-size: 0.78rem;
+        line-height: 1.5;
+        color: var(--muted);
+      }
       .results-head {
         display: flex;
         justify-content: space-between;
@@ -1281,6 +1376,33 @@ def build_explorer_html() -> str:
       }
       .sample-card .body {
         padding: 14px;
+      }
+      .sample-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .sample-actions button {
+        padding: 8px 10px;
+        font-size: 0.78rem;
+      }
+      .match-card {
+        margin-top: 10px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: #111119;
+        border: 2px solid var(--line);
+      }
+      .match-card strong {
+        display: block;
+        color: var(--ink);
+        margin-bottom: 6px;
+      }
+      .match-card code {
+        display: inline-block;
+        margin-right: 6px;
+        margin-top: 4px;
       }
       .sample-card h3 {
         margin: 0 0 8px;
@@ -1485,105 +1607,6 @@ def build_explorer_html() -> str:
         overflow-wrap: anywhere;
         word-break: break-word;
       }
-      /* ── Elasticsearch annotation search ── */
-      .es-badge {
-        display: inline-block;
-        background: #1a7a5e;
-        color: #a8f0d8;
-        font-size: .65rem;
-        font-weight: 700;
-        letter-spacing: .06em;
-        padding: 1px 7px;
-        border-radius: 999px;
-        vertical-align: middle;
-        margin-left: 4px;
-      }
-      .es-input-row {
-        display: flex;
-        gap: 6px;
-        margin-top: 8px;
-      }
-      .es-input-row input {
-        flex: 1;
-        min-width: 0;
-      }
-      .es-input-row button {
-        white-space: nowrap;
-        padding: 8px 12px;
-      }
-      .es-status-line {
-        font-size: .78rem;
-        color: var(--muted);
-        margin-top: 6px;
-        min-height: 1.2em;
-      }
-      .es-status-line.unavailable { color: #f2cc0c; }
-      .es-status-line.error { color: #e05252; }
-      #es-results-section {
-        border-top: 1px dashed #2e6b54;
-        padding-top: 12px;
-        margin-top: 4px;
-      }
-      .es-results-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 10px;
-      }
-      .es-hit {
-        cursor: pointer;
-      }
-      .es-hit img {
-        width: 100%;
-        aspect-ratio: 16 / 9;
-        object-fit: cover;
-        display: block;
-        background: #2a2938;
-      }
-      .es-score {
-        font-size: .7rem;
-        color: #5ab890;
-        margin-bottom: 4px;
-      }
-      .es-cats {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-        margin-top: 6px;
-      }
-      .es-cat {
-        font-size: .68rem;
-        padding: 2px 7px;
-        border-radius: 999px;
-        background: #0f2a1e;
-        border: 1px solid #1a7a5e;
-        color: #a8f0d8;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 160px;
-      }
-      .es-facets {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px;
-        margin-top: 10px;
-      }
-      .es-facet-btn {
-        font-size: .7rem;
-        padding: 3px 9px;
-        border-radius: 999px;
-        border: 1px solid #1a7a5e;
-        background: #0f2a1e;
-        color: #a8f0d8;
-        cursor: pointer;
-      }
-      .es-facet-btn:hover { background: #1a4a32; }
-      .es-scene-btn { border-color: #544bb0; background: #12101e; color: var(--ink); }
-      .es-count {
-        opacity: .7;
-        margin-left: 3px;
-      }
       @media (max-width: 1380px) {
         .shell { grid-template-columns: minmax(280px, 300px) minmax(0, 1fr); }
         .detail { grid-column: 1 / -1; position: static; }
@@ -1648,6 +1671,55 @@ def build_explorer_html() -> str:
             <button id="reset" class="secondary">Reset</button>
           </div>
 
+          <section class="mining-panel">
+            <h2>Mining workspace</h2>
+            <p>Keep the same search bar, then add positive and negative examples to turn lexical search into multimodal retrieval.</p>
+            <div class="field">
+              <label for="retrieval_mode">Retrieval mode</label>
+              <select id="retrieval_mode">
+                <option value="hybrid" selected>Hybrid</option>
+                <option value="example-driven">Example-driven</option>
+                <option value="lexical">Lexical only</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="modality_preset">Modality preset</label>
+              <select id="modality_preset">
+                <option value="balanced" selected>Balanced</option>
+                <option value="image-heavy">Image-heavy</option>
+                <option value="lidar-heavy">LiDAR-heavy</option>
+                <option value="metadata-heavy">Metadata-heavy</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="session_name">Session label</label>
+              <input id="session_name" type="text" placeholder="night pedestrians, parked cars, lane change">
+              <div class="subtle-copy">Create a reusable mining session before saving cohorts or walking an interviewer through examples.</div>
+            </div>
+            <div class="button-row">
+              <button id="create_session" class="secondary">Create session</button>
+              <button id="save_cohort" class="secondary">Save cohort</button>
+            </div>
+            <div id="session_meta" class="mining-note">No active session. Search still works; examples stay local until you create one.</div>
+
+            <div class="example-stack">
+              <section class="example-box">
+                <strong>Positive examples</strong>
+                <div id="positive_examples" class="chip-row"></div>
+              </section>
+              <section class="example-box">
+                <strong>Negative examples</strong>
+                <div id="negative_examples" class="chip-row"></div>
+              </section>
+            </div>
+
+            <h3 style="margin-top: 20px;">Recent sessions</h3>
+            <ul id="recent_sessions" class="stack-list"></ul>
+
+            <h3 style="margin-top: 20px;">Saved cohorts</h3>
+            <ul id="saved_cohorts" class="stack-list"></ul>
+          </section>
+
           <h2 style="margin-top: 24px;">Popular locations</h2>
           <ul id="top_locations" class="list"></ul>
 
@@ -1686,6 +1758,16 @@ def build_explorer_html() -> str:
 
     <script>
       const initialParams = new URLSearchParams(window.location.search);
+      const parseIds = (value) => (value || "")
+        .split(",")
+        .map((entry) => Number(entry.trim()))
+        .filter((entry) => Number.isInteger(entry) && entry >= 0);
+      const modalityPresets = {
+        balanced: "Balanced",
+        "image-heavy": "Image-heavy",
+        "lidar-heavy": "LiDAR-heavy",
+        "metadata-heavy": "Metadata-heavy",
+      };
       const state = {
         q: initialParams.get("q") || "",
         scene: initialParams.get("scene_token") || "",
@@ -1695,6 +1777,13 @@ def build_explorer_html() -> str:
         limit: Number(initialParams.get("limit") || 24),
         offset: Number(initialParams.get("offset") || 0),
         total: 0,
+        retrievalMode: initialParams.get("retrieval_mode") || "hybrid",
+        modalityPreset: initialParams.get("modality_preset") || "balanced",
+        sessionId: initialParams.get("session_id") || "",
+        sessionName: "",
+        positiveIds: parseIds(initialParams.get("positive_ids")),
+        negativeIds: parseIds(initialParams.get("negative_ids")),
+        currentResults: [],
       };
 
       const el = {
@@ -1707,6 +1796,16 @@ def build_explorer_html() -> str:
         limit: document.getElementById("limit"),
         apply: document.getElementById("apply"),
         reset: document.getElementById("reset"),
+        retrievalMode: document.getElementById("retrieval_mode"),
+        modalityPreset: document.getElementById("modality_preset"),
+        sessionName: document.getElementById("session_name"),
+        createSession: document.getElementById("create_session"),
+        saveCohort: document.getElementById("save_cohort"),
+        sessionMeta: document.getElementById("session_meta"),
+        positiveExamples: document.getElementById("positive_examples"),
+        negativeExamples: document.getElementById("negative_examples"),
+        recentSessions: document.getElementById("recent_sessions"),
+        savedCohorts: document.getElementById("saved_cohorts"),
         summary: document.getElementById("summary"),
         topLocations: document.getElementById("top_locations"),
         topCategories: document.getElementById("top_categories"),
@@ -1721,10 +1820,16 @@ def build_explorer_html() -> str:
       el.q.value = state.q;
       el.minAnnotations.value = String(state.minAnnotations);
       el.limit.value = String(state.limit);
+      el.retrievalMode.value = state.retrievalMode;
+      el.modalityPreset.value = state.modalityPreset;
 
       function showNotice(message) {
         el.notice.hidden = !message;
         el.notice.textContent = message || "";
+      }
+
+      function setSessionMeta(message) {
+        el.sessionMeta.textContent = message || "No active session. Search still works; examples stay local until you create one.";
       }
 
       function paramsFromState() {
@@ -1734,18 +1839,234 @@ def build_explorer_html() -> str:
         if (state.location) params.set("location", state.location);
         if (state.category) params.set("category", state.category);
         if (state.minAnnotations > 0) params.set("min_annotations", String(state.minAnnotations));
+        if (state.retrievalMode) params.set("retrieval_mode", state.retrievalMode);
+        if (state.modalityPreset) params.set("modality_preset", state.modalityPreset);
+        if (state.sessionId) params.set("session_id", state.sessionId);
         params.set("limit", String(state.limit));
         params.set("offset", String(state.offset));
         return params;
       }
 
-      async function requestJson(url) {
-        const response = await fetch(url);
+      async function requestJson(url, options = {}) {
+        const response = await fetch(url, options);
         if (!response.ok) {
           const payload = await response.json().catch(() => ({ detail: "request failed" }));
           throw new Error(payload.detail || "request failed");
         }
         return response.json();
+      }
+
+      function isMiningActive() {
+        if (state.retrievalMode === "lexical") {
+          return false;
+        }
+        return Boolean(
+          state.q ||
+          state.positiveIds.length ||
+          state.negativeIds.length ||
+          state.retrievalMode === "example-driven"
+        );
+      }
+
+      function currentFilters() {
+        return {
+          scene_token: state.scene,
+          location: state.location,
+          category: state.category,
+          min_annotations: state.minAnnotations,
+        };
+      }
+
+      function currentMiningPayload() {
+        return {
+          q: state.q,
+          scene_token: state.scene,
+          location: state.location,
+          category: state.category,
+          min_annotations: state.minAnnotations,
+          limit: state.limit,
+          offset: state.offset,
+          mode: state.retrievalMode,
+          modality_preset: state.modalityPreset,
+          session_id: state.sessionId || null,
+          positive_sample_ids: state.positiveIds,
+          negative_sample_ids: state.negativeIds,
+        };
+      }
+
+      async function loadMiningOverview() {
+        const payload = await requestJson("/api/mining/overview");
+        renderMiningCollections(payload);
+      }
+
+      async function createSession() {
+        const label = el.sessionName.value.trim() || `session-${new Date().toISOString().slice(11, 19)}`;
+        const payload = await requestJson("/api/mining/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            label,
+            query: state.q,
+            mode: state.retrievalMode,
+            modality_preset: state.modalityPreset,
+          }),
+        });
+        state.sessionId = payload.session_id || "";
+        state.sessionName = payload.label || label;
+        el.sessionName.value = state.sessionName;
+        setSessionMeta(`Session ${state.sessionName} is active.`);
+        await syncSessionExamples();
+        await loadMiningOverview();
+      }
+
+      async function syncSessionExamples() {
+        if (!state.sessionId) {
+          setSessionMeta("No active session. Search still works; examples stay local until you create one.");
+          return;
+        }
+        const payload = await requestJson(`/api/mining/sessions/${encodeURIComponent(state.sessionId)}/examples`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            positive_sample_ids: state.positiveIds,
+            negative_sample_ids: state.negativeIds,
+            query: state.q,
+            mode: state.retrievalMode,
+            modality_preset: state.modalityPreset,
+            filters: currentFilters(),
+          }),
+        });
+        setSessionMeta(
+          `Session ${payload.label || state.sessionName || state.sessionId} · `
+          + `${(payload.positive_sample_ids || []).length} positives · `
+          + `${(payload.negative_sample_ids || []).length} negatives`
+        );
+      }
+
+      async function saveCohort() {
+        const name = window.prompt("Cohort name");
+        if (!name) return;
+        const sampleIds = (state.currentResults || []).map((sample) => sample.sample_idx);
+        const payload = await requestJson("/api/mining/cohorts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: state.sessionId || null,
+            name,
+            query: state.q,
+            filters: currentFilters(),
+            sample_ids: sampleIds,
+          }),
+        });
+        showNotice(`Saved cohort ${payload.name}.`);
+        await loadMiningOverview();
+      }
+
+      async function markExample(sampleIdx, polarity) {
+        const targetKey = polarity === "positive" ? "positiveIds" : "negativeIds";
+        const oppositeKey = polarity === "positive" ? "negativeIds" : "positiveIds";
+        state[oppositeKey] = state[oppositeKey].filter((value) => value !== sampleIdx);
+        if (state[targetKey].includes(sampleIdx)) {
+          state[targetKey] = state[targetKey].filter((value) => value !== sampleIdx);
+        } else {
+          state[targetKey] = [...state[targetKey], sampleIdx];
+        }
+        renderExampleChips();
+        await syncSessionExamples();
+        await refresh(true);
+      }
+
+      window.markExample = markExample;
+
+      function renderExampleChips() {
+        const renderChip = (sampleIdx, polarity) => `
+          <span class="chip action ${polarity}" data-remove-example="${sampleIdx}" data-polarity="${polarity}">
+            ${polarity === "positive" ? "+" : "−"} sample ${sampleIdx}
+          </span>
+        `;
+        el.positiveExamples.innerHTML = state.positiveIds.length
+          ? state.positiveIds.map((sampleIdx) => renderChip(sampleIdx, "positive")).join("")
+          : `<span class="subtle-copy">No positives yet.</span>`;
+        el.negativeExamples.innerHTML = state.negativeIds.length
+          ? state.negativeIds.map((sampleIdx) => renderChip(sampleIdx, "negative")).join("")
+          : `<span class="subtle-copy">No negatives yet.</span>`;
+
+        document.querySelectorAll("[data-remove-example]").forEach((node) => {
+          node.addEventListener("click", async () => {
+            const sampleIdx = Number(node.dataset.removeExample);
+            const polarity = node.dataset.polarity;
+            if (polarity === "positive") {
+              state.positiveIds = state.positiveIds.filter((value) => value !== sampleIdx);
+            } else {
+              state.negativeIds = state.negativeIds.filter((value) => value !== sampleIdx);
+            }
+            renderExampleChips();
+            await syncSessionExamples();
+            await refresh(true);
+          });
+        });
+      }
+
+      function renderMiningCollections(payload) {
+        const sessions = payload.sessions || [];
+        const cohorts = payload.cohorts || [];
+
+        el.recentSessions.innerHTML = sessions.length ? sessions.map((session) => `
+          <li>
+            <div>
+              <strong style="display:block;color:var(--ink);margin-bottom:6px;">${session.label || session.session_id}</strong>
+              <span>${session.mode} · ${session.positive_count || 0} positives · ${session.negative_count || 0} negatives</span>
+            </div>
+            <button class="secondary" data-load-session="${session.session_id}">Load</button>
+          </li>
+        `).join("") : `<li><span>No saved sessions yet.</span></li>`;
+
+        el.savedCohorts.innerHTML = cohorts.length ? cohorts.map((cohort) => `
+          <li>
+            <div>
+              <strong style="display:block;color:var(--ink);margin-bottom:6px;">${cohort.name}</strong>
+              <span>${(cohort.sample_ids || []).length} samples · ${cohort.query || "saved cohort"}</span>
+            </div>
+            <button class="secondary" data-load-cohort="${cohort.cohort_id}">Load</button>
+          </li>
+        `).join("") : `<li><span>No cohorts saved yet.</span></li>`;
+
+        document.querySelectorAll("[data-load-session]").forEach((node) => {
+          node.addEventListener("click", async () => {
+            const payload = await requestJson(`/api/mining/sessions/${encodeURIComponent(node.dataset.loadSession)}`);
+            state.sessionId = payload.session_id || "";
+            state.sessionName = payload.label || "";
+            state.q = payload.query || "";
+            state.retrievalMode = payload.mode || "hybrid";
+            state.positiveIds = payload.positive_sample_ids || [];
+            state.negativeIds = payload.negative_sample_ids || [];
+            state.modalityPreset = payload.modality_preset || "balanced";
+            el.sessionName.value = state.sessionName;
+            el.q.value = state.q;
+            el.retrievalMode.value = state.retrievalMode;
+            el.modalityPreset.value = state.modalityPreset;
+            setSessionMeta(`Session ${state.sessionName || state.sessionId} loaded.`);
+            renderExampleChips();
+            await refresh(true);
+          });
+        });
+
+        document.querySelectorAll("[data-load-cohort]").forEach((node) => {
+          node.addEventListener("click", async () => {
+            const cohort = await requestJson(`/api/mining/cohorts/${encodeURIComponent(node.dataset.loadCohort)}`);
+            state.q = cohort.query || "";
+            el.q.value = state.q;
+            state.offset = 0;
+            const sampleIds = cohort.sample_ids || [];
+            if (sampleIds.length) {
+              state.positiveIds = sampleIds.slice(0, Math.min(sampleIds.length, 8));
+              state.negativeIds = [];
+              renderExampleChips();
+            }
+            showNotice(`Loaded cohort ${cohort.name}.`);
+            await refresh(true);
+          });
+        });
       }
 
       function renderSummary(summary) {
@@ -1807,10 +2128,14 @@ def build_explorer_html() -> str:
       }
 
       function renderResults(payload) {
+        state.currentResults = payload.items || [];
         state.total = payload.total || 0;
         const start = payload.items.length ? payload.offset + 1 : 0;
         const end = payload.offset + payload.items.length;
-        el.resultMeta.textContent = `${state.total} matching samples`;
+        const miningMeta = payload.mining
+          ? ` · ${payload.mining.mode} · ${formatMetric(payload.mining.latency_ms, 1)} ms`
+          : "";
+        el.resultMeta.textContent = `${state.total} matching samples${miningMeta}`;
         el.pageMeta.textContent = start ? `${start}-${end}` : "0";
         el.prev.disabled = payload.offset <= 0;
         el.next.disabled = payload.offset + payload.limit >= payload.total;
@@ -1834,12 +2159,33 @@ def build_explorer_html() -> str:
               <div class="chip-row">
                 ${(sample.annotation_categories || []).slice(0, 6).map((category) => `<span class="chip">${category}</span>`).join("")}
               </div>
+              ${sample.match ? `
+                <div class="match-card">
+                  <strong>Hybrid match</strong>
+                  <div>score ${formatMetric(sample.match.score, 4)} · ${(sample.match.channels || []).join(" · ") || "lexical"}</div>
+                  <div class="chip-row">
+                    ${Object.entries(sample.match.breakdown || {})
+                      .map(([key, value]) => `<code>${key}:${formatMetric(value, 4)}</code>`)
+                      .join("")}
+                  </div>
+                </div>
+              ` : ""}
+              <div class="sample-actions">
+                <button class="secondary" data-example="positive" data-sample="${sample.sample_idx}">+ positive</button>
+                <button class="secondary" data-example="negative" data-sample="${sample.sample_idx}">− negative</button>
+              </div>
             </div>
           </article>
         `).join("");
 
         document.querySelectorAll(".sample-card[data-sample]").forEach((node) => {
           node.addEventListener("click", () => loadDetail(node.dataset.sample));
+        });
+        document.querySelectorAll("[data-example]").forEach((node) => {
+          node.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            await markExample(Number(node.dataset.sample), node.dataset.example);
+          });
         });
       }
 
@@ -1855,6 +2201,17 @@ def build_explorer_html() -> str:
       }
 
       function renderDetail(sample) {
+        const matchBreakdown = sample.match ? `
+          <div class="match-card">
+            <strong>Hybrid match</strong>
+            <div>score ${formatMetric(sample.match.score, 4)} · ${(sample.match.channels || []).join(" · ") || "lexical"}</div>
+            <div class="chip-row">
+              ${Object.entries(sample.match.breakdown || {})
+                .map(([key, value]) => `<code>${key}:${formatMetric(value, 4)}</code>`)
+                .join("")}
+            </div>
+          </div>
+        ` : "";
         const cameraFrames = Object.entries(sample.camera_urls || {})
           .map(([camera, url]) => url ? `
             <div class="camera-frame">
@@ -1878,8 +2235,11 @@ def build_explorer_html() -> str:
             <span class="chip">token ${sample.token.slice(0, 12)}</span>
             <span class="chip">scene ${sample.scene_token.slice(0, 12)}</span>
           </div>
+          ${matchBreakdown}
           <div class="button-row" style="margin-top:14px;">
             <button class="secondary" onclick="window.location.href='/scene-studio?scene_token=${encodeURIComponent(sample.scene_token)}&sample_idx=${sample.sample_idx}'">Open scene studio</button>
+            <button class="secondary" onclick="window.markExample(${sample.sample_idx}, 'positive')">Use as positive</button>
+            <button class="secondary" onclick="window.markExample(${sample.sample_idx}, 'negative')">Use as negative</button>
           </div>
 
           <h3 style="margin-top:18px;">Scene strip</h3>
@@ -1954,12 +2314,25 @@ def build_explorer_html() -> str:
       }
 
       async function loadResults() {
-        const payload = await requestJson(`/api/samples?${paramsFromState().toString()}`);
+        let payload;
+        if (isMiningActive()) {
+          payload = await requestJson("/api/mining/search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(currentMiningPayload()),
+          });
+        } else {
+          payload = await requestJson(`/api/samples?${paramsFromState().toString()}`);
+        }
         renderResults(payload);
       }
 
       async function loadDetail(sampleIdx) {
         const sample = await requestJson(`/api/samples/${sampleIdx}`);
+        const active = (state.currentResults || []).find((item) => Number(item.sample_idx) === Number(sampleIdx));
+        if (active && active.match) {
+          sample.match = active.match;
+        }
         renderDetail(sample);
         const scenePayload = await requestJson(`/api/scenes/${encodeURIComponent(sample.scene_token)}/samples`);
         renderSceneSamples(scenePayload.items || []);
@@ -1972,6 +2345,9 @@ def build_explorer_html() -> str:
         state.category = el.category.value;
         state.minAnnotations = Number(el.minAnnotations.value || 0);
         state.limit = Number(el.limit.value || 24);
+        state.retrievalMode = el.retrievalMode.value;
+        state.modalityPreset = el.modalityPreset.value;
+        state.sessionName = el.sessionName.value.trim();
       }
 
       async function refresh(resetOffset = false) {
@@ -1979,7 +2355,7 @@ def build_explorer_html() -> str:
         if (resetOffset) state.offset = 0;
         try {
           showNotice("");
-          await Promise.all([loadSummary(), loadResults()]);
+          await Promise.all([loadSummary(), loadResults(), loadMiningOverview()]);
         } catch (error) {
           showNotice(error.message);
         }
@@ -1993,7 +2369,12 @@ def build_explorer_html() -> str:
         el.category.value = "";
         el.minAnnotations.value = "0";
         el.limit.value = "24";
+        el.retrievalMode.value = "hybrid";
+        el.modalityPreset.value = "balanced";
+        state.positiveIds = [];
+        state.negativeIds = [];
         state.offset = 0;
+        renderExampleChips();
         await refresh(true);
       });
       el.prev.addEventListener("click", async () => {
@@ -2007,10 +2388,28 @@ def build_explorer_html() -> str:
       el.q.addEventListener("keydown", (event) => {
         if (event.key === "Enter") refresh(true);
       });
+      el.createSession.addEventListener("click", async () => {
+        try {
+          await createSession();
+        } catch (error) {
+          showNotice(error.message);
+        }
+      });
+      el.saveCohort.addEventListener("click", async () => {
+        try {
+          await saveCohort();
+        } catch (error) {
+          showNotice(error.message);
+        }
+      });
 
       (async () => {
         try {
           await loadFilters();
+          renderExampleChips();
+          if (state.sessionId) {
+            setSessionMeta(`Session ${state.sessionId} loaded from URL.`);
+          }
           await refresh(true);
         } catch (error) {
           showNotice(error.message);
@@ -3131,6 +3530,8 @@ def create_app(
     store = ExplorerStore(config)
     report_store = BenchmarkReportStore(config.runtime.reports_root)
     es_store = ElasticsearchBackend(url=config.services.elasticsearch.url)
+    mining_store = MiningSessionStore(config.services.postgres)
+    mining_service = MiningSearchService(config, es_backend=es_store)
     default_limit = max(1, min(result_limit, 100))
     app = FastAPI(title="nuDemo Browser", docs_url="/docs", redoc_url=None)
     install_http_metrics(app)
@@ -3235,6 +3636,189 @@ def create_app(
             )
         except Exception as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/mining/overview")
+    def api_mining_overview(
+        limit: int = Query(default=8, ge=1, le=24),
+    ) -> dict[str, Any]:
+        try:
+            sessions = [_session_response(row) for row in mining_store.list_sessions(limit=limit)]
+            cohorts = mining_store.list_cohorts(limit=limit)
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {"sessions": sessions, "cohorts": cohorts}
+
+    @app.get("/api/mining/sessions")
+    def api_mining_sessions(
+        limit: int = Query(default=12, ge=1, le=24),
+    ) -> dict[str, Any]:
+        try:
+            return {"items": [_session_response(row) for row in mining_store.list_sessions(limit=limit)]}
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/api/mining/sessions")
+    def api_create_mining_session(payload: dict[str, Any] | None = JSON_BODY) -> dict[str, Any]:
+        payload = payload or {}
+        try:
+            session = mining_store.create_session(
+                label=str(payload.get("label") or "").strip(),
+                query=str(payload.get("query") or "").strip(),
+                mode=str(payload.get("mode") or "hybrid"),
+                modality_weights=resolve_modality_weights(
+                    preset=str(payload.get("modality_preset") or "balanced"),
+                    overrides=payload.get("modality_weights") or {},
+                ),
+            )
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return _session_response(session)
+
+    @app.get("/api/mining/sessions/{session_id}")
+    def api_mining_session(session_id: str) -> dict[str, Any]:
+        try:
+            return _session_response(mining_store.get_session(session_id))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"session {session_id} was not found") from exc
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.put("/api/mining/sessions/{session_id}/examples")
+    def api_replace_mining_examples(
+        session_id: str,
+        payload: dict[str, Any] | None = JSON_BODY,
+    ) -> dict[str, Any]:
+        payload = payload or {}
+        try:
+            session = mining_store.replace_examples(
+                session_id,
+                positive_sample_ids=[int(value) for value in payload.get("positive_sample_ids") or []],
+                negative_sample_ids=[int(value) for value in payload.get("negative_sample_ids") or []],
+                query=str(payload.get("query") or "").strip(),
+                mode=str(payload.get("mode") or "hybrid"),
+                modality_weights=resolve_modality_weights(
+                    preset=str(payload.get("modality_preset") or "balanced"),
+                    overrides=payload.get("modality_weights") or {},
+                ),
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"session {session_id} was not found") from exc
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return _session_response(session)
+
+    @app.get("/api/mining/cohorts")
+    def api_mining_cohorts(
+        limit: int = Query(default=16, ge=1, le=32),
+    ) -> dict[str, Any]:
+        try:
+            return {"items": mining_store.list_cohorts(limit=limit)}
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/mining/cohorts/{cohort_id}")
+    def api_mining_cohort(cohort_id: str) -> dict[str, Any]:
+        try:
+            return mining_store.get_cohort(cohort_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"cohort {cohort_id} was not found") from exc
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/api/mining/cohorts")
+    def api_create_mining_cohort(payload: dict[str, Any] | None = JSON_BODY) -> dict[str, Any]:
+        payload = payload or {}
+        try:
+            return mining_store.save_cohort(
+                payload.get("session_id"),
+                name=str(payload.get("name") or "untitled cohort").strip(),
+                query=str(payload.get("query") or "").strip(),
+                filters=dict(payload.get("filters") or {}),
+                sample_ids=[int(value) for value in payload.get("sample_ids") or []],
+            )
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/api/mining/search")
+    def api_mining_search(payload: dict[str, Any] | None = JSON_BODY) -> dict[str, Any]:
+        payload = payload or {}
+        if not es_store.is_available():
+            raise HTTPException(
+                status_code=503,
+                detail=f"Elasticsearch is not running at {config.services.elasticsearch.url}. Run: make deps",
+            )
+
+        q = str(payload.get("q") or "").strip()
+        session_id = str(payload.get("session_id") or "").strip()
+        positive_ids = [int(value) for value in payload.get("positive_sample_ids") or []]
+        negative_ids = [int(value) for value in payload.get("negative_sample_ids") or []]
+        mode = str(payload.get("mode") or "hybrid")
+        if session_id and not positive_ids and not negative_ids:
+            try:
+                session = mining_store.get_session(session_id)
+                positive_ids = [int(value) for value in session.get("positive_sample_ids") or []]
+                negative_ids = [int(value) for value in session.get("negative_sample_ids") or []]
+                if not payload.get("q"):
+                    q = str(session.get("query") or "").strip()
+                if not payload.get("mode"):
+                    mode = str(session.get("mode") or "hybrid")
+            except KeyError:
+                session_id = ""
+
+        weights = resolve_modality_weights(
+            preset=str(payload.get("modality_preset") or "balanced"),
+            overrides=payload.get("modality_weights") or {},
+        )
+        started = time.perf_counter()
+        try:
+            mining_payload = mining_service.search(
+                q=q,
+                scene_token=str(payload.get("scene_token") or ""),
+                location=str(payload.get("location") or ""),
+                category=str(payload.get("category") or ""),
+                min_annotations=int(payload.get("min_annotations") or 0),
+                size=max(1, min(int(payload.get("limit") or default_limit), 100)),
+                from_=max(0, int(payload.get("offset") or 0)),
+                mode=mode,
+                modality_weights=weights,
+                positive_sample_ids=positive_ids,
+                negative_sample_ids=negative_ids,
+            )
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        hit_map = {int(hit["sample_idx"]): hit for hit in mining_payload.get("hits", [])}
+        hydrated = store.fetch_samples_by_ids([int(hit["sample_idx"]) for hit in mining_payload.get("hits", [])])
+        items = []
+        for item in hydrated:
+            hit = hit_map.get(int(item["sample_idx"]), {})
+            enriched = dict(item)
+            enriched["match"] = {
+                "score": round(float(hit.get("score") or 0.0), 6),
+                "channels": [
+                    key
+                    for key, value in (hit.get("score_breakdown") or {}).items()
+                    if abs(float(value)) > 0.0001
+                ],
+                "breakdown": hit.get("score_breakdown") or {},
+                "dominant_signal": hit.get("dominant_signal") or "",
+            }
+            items.append(enriched)
+
+        latency_ms = (time.perf_counter() - started) * 1000.0
+        return {
+            "total": int(mining_payload.get("total") or 0),
+            "limit": int(payload.get("limit") or default_limit),
+            "offset": int(payload.get("offset") or 0),
+            "items": items,
+            "aggregations": mining_payload.get("aggs") or {},
+            "mining": {
+                **(mining_payload.get("meta") or {}),
+                "latency_ms": round(latency_ms, 3),
+                "session_id": session_id or None,
+                "modality_preset": str(payload.get("modality_preset") or "balanced"),
+            },
+        }
 
     @app.get("/api/samples")
     def api_samples(
