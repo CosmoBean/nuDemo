@@ -37,6 +37,7 @@ from nudemo.domain.models import CAMERAS, RADARS
 from nudemo.explorer import create_explorer_app
 from nudemo.extraction.providers import resolve_provider
 from nudemo.ingestion.kafka import KafkaBenchmarker, KafkaPayloadEncoder
+from nudemo.mining import TASK_PRIORITIES, TASK_STATUSES
 from nudemo.rendering import render_sample_contact_sheet, render_scene_gif
 from nudemo.reporting.dashboard import build_dashboard_html
 from nudemo.reporting.dashboard import main as dashboard_main
@@ -669,6 +670,146 @@ def command_multimodal_index(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_track_index(args: argparse.Namespace) -> int:
+    from nudemo.mining import TrackMaterializer
+    from nudemo.storage.track_elasticsearch_store import TrackElasticsearchBackend
+
+    config = AppConfig.load(args.config)
+    es = TrackElasticsearchBackend(url=config.services.elasticsearch.url)
+    materializer = TrackMaterializer(config, es_backend=es)
+
+    if not args.materialize_only and not es.is_available():
+        print(f"ERROR: Elasticsearch not reachable at {config.services.elasticsearch.url}")
+        print("Start it with: make deps")
+        return 1
+
+    if args.index_only:
+        result = materializer.index_materialized_tracks(
+            rebuild=not args.append,
+            batch_size=args.batch_size,
+            limit=args.limit,
+            scene_limit=args.scene_limit,
+        )
+    elif args.materialize_only:
+        result = materializer.materialize_loaded_tracks(
+            limit=args.limit,
+            scene_limit=args.scene_limit,
+        )
+    else:
+        result = materializer.materialize_and_index(
+            rebuild=not args.append,
+            batch_size=args.batch_size,
+            limit=args.limit,
+            scene_limit=args.scene_limit,
+        )
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def command_track_search(args: argparse.Namespace) -> int:
+    from nudemo.mining import TrackStore
+    from nudemo.storage.track_elasticsearch_store import TrackElasticsearchBackend
+
+    config = AppConfig.load(args.config)
+    store = TrackStore(config.services.postgres)
+    if args.source == "postgres":
+        result = store.search_tracks(
+            q=args.q,
+            scene_token=args.scene_token,
+            location=args.location,
+            category=args.category,
+            limit=args.limit,
+            offset=args.offset,
+        )
+    else:
+        es = TrackElasticsearchBackend(url=config.services.elasticsearch.url)
+        if not es.is_available():
+            print(f"ERROR: Elasticsearch not reachable at {config.services.elasticsearch.url}")
+            print("Start it with: make deps")
+            return 1
+        result = es.search(
+            q=args.q,
+            scene_token=args.scene_token,
+            location=args.location,
+            category=args.category,
+            size=args.limit,
+            from_=args.offset,
+        )
+        hits = result.get("hits", [])
+        hydrated = store.hydrate_tracks([str(hit["track_id"]) for hit in hits])
+        score_map = {
+            str(hit["track_id"]): float(hit.get("score") or 0.0)
+            for hit in hits
+        }
+        result = {
+            "total": result.get("total", 0),
+            "items": [
+                {**item, "score": score_map.get(str(item["track_id"]), 0.0)}
+                for item in hydrated
+            ],
+            "limit": args.limit,
+            "offset": args.offset,
+        }
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def command_export_cohort(args: argparse.Namespace) -> int:
+    from nudemo.mining import CohortExportService
+
+    config = AppConfig.load(args.config)
+    service = CohortExportService(config)
+    result = service.export_cohort(args.cohort_id, task_id=args.task_id)
+    print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
+def command_tasks(args: argparse.Namespace) -> int:
+    from nudemo.mining import ReviewTaskStore
+
+    config = AppConfig.load(args.config)
+    store = ReviewTaskStore(config.services.postgres)
+    subcommand = args.tasks_command
+
+    if subcommand == "list":
+        payload = store.list_tasks(status=args.status, limit=args.limit)
+        print(json.dumps(payload, indent=2, default=str))
+        return 0
+    if subcommand == "create":
+        result = store.create_task(
+            source_type=args.source_type,
+            source_id=args.source_id,
+            title=args.title,
+            description=args.description,
+            priority=args.priority,
+            assignee=args.assignee,
+            metadata=json.loads(args.metadata or "{}"),
+        )
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+    if subcommand == "claim":
+        result = store.claim_task(args.task_id, actor=args.actor)
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+    if subcommand == "start":
+        result = store.start_task(args.task_id, actor=args.actor)
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+    if subcommand == "submit":
+        result = store.submit_task(args.task_id, actor=args.actor, note=args.note)
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+    if subcommand == "qa":
+        result = store.qa_task(args.task_id, actor=args.actor, passed=args.passed, note=args.note)
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+    if subcommand == "close":
+        result = store.close_task(args.task_id, actor=args.actor, note=args.note)
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+    raise ValueError(f"unsupported tasks command {subcommand}")
+
+
 def command_render_scene(args: argparse.Namespace) -> int:
     config = AppConfig.load(args.config)
     output_path = Path(args.output) if args.output else None
@@ -819,6 +960,97 @@ def build_parser() -> argparse.ArgumentParser:
         help="Append/update documents instead of rebuilding the index first.",
     )
     multimodal_index.set_defaults(func=command_multimodal_index)
+
+    track_index = subparsers.add_parser(
+        "track-index",
+        help=(
+            "Materialize track tables from the loaded nuScenes corpus "
+            "and index them into Elasticsearch"
+        ),
+    )
+    track_index.add_argument("--limit", type=int, default=None)
+    track_index.add_argument("--scene-limit", type=int, default=None)
+    track_index.add_argument("--batch-size", type=int, default=500)
+    track_index.add_argument("--append", action="store_true")
+    track_index.add_argument("--materialize-only", action="store_true")
+    track_index.add_argument("--index-only", action="store_true")
+    track_index.set_defaults(func=command_track_index)
+
+    track_search = subparsers.add_parser(
+        "track-search",
+        help="Search materialized tracks via PostgreSQL or Elasticsearch",
+    )
+    track_search.add_argument("--q", default="")
+    track_search.add_argument("--scene-token", default="")
+    track_search.add_argument("--location", default="")
+    track_search.add_argument("--category", default="")
+    track_search.add_argument("--limit", type=int, default=20)
+    track_search.add_argument("--offset", type=int, default=0)
+    track_search.add_argument(
+        "--source",
+        choices=["elasticsearch", "postgres"],
+        default="elasticsearch",
+    )
+    track_search.set_defaults(func=command_track_search)
+
+    export_cohort = subparsers.add_parser(
+        "export-cohort",
+        help="Export a saved cohort as a Parquet manifest",
+    )
+    export_cohort.add_argument("cohort_id")
+    export_cohort.add_argument("--task-id", default=None)
+    export_cohort.set_defaults(func=command_export_cohort)
+
+    tasks = subparsers.add_parser("tasks", help="Inspect or transition review tasks")
+    tasks_sub = tasks.add_subparsers(dest="tasks_command", required=True)
+
+    tasks_list = tasks_sub.add_parser("list")
+    tasks_list.add_argument("--status", default=None, choices=list(TASK_STATUSES))
+    tasks_list.add_argument("--limit", type=int, default=50)
+    tasks_list.set_defaults(func=command_tasks)
+
+    tasks_create = tasks_sub.add_parser("create")
+    tasks_create.add_argument(
+        "--source-type",
+        default="manual",
+        choices=["cohort", "track", "manual"],
+    )
+    tasks_create.add_argument("--source-id", default=None)
+    tasks_create.add_argument("--title", required=True)
+    tasks_create.add_argument("--description", default="")
+    tasks_create.add_argument("--priority", default="normal", choices=list(TASK_PRIORITIES))
+    tasks_create.add_argument("--assignee", default="")
+    tasks_create.add_argument("--metadata", default="{}")
+    tasks_create.set_defaults(func=command_tasks)
+
+    tasks_claim = tasks_sub.add_parser("claim")
+    tasks_claim.add_argument("task_id")
+    tasks_claim.add_argument("--actor", required=True)
+    tasks_claim.set_defaults(func=command_tasks)
+
+    tasks_start = tasks_sub.add_parser("start")
+    tasks_start.add_argument("task_id")
+    tasks_start.add_argument("--actor", required=True)
+    tasks_start.set_defaults(func=command_tasks)
+
+    tasks_submit = tasks_sub.add_parser("submit")
+    tasks_submit.add_argument("task_id")
+    tasks_submit.add_argument("--actor", required=True)
+    tasks_submit.add_argument("--note", default="")
+    tasks_submit.set_defaults(func=command_tasks)
+
+    tasks_qa = tasks_sub.add_parser("qa")
+    tasks_qa.add_argument("task_id")
+    tasks_qa.add_argument("--actor", required=True)
+    tasks_qa.add_argument("--passed", action="store_true")
+    tasks_qa.add_argument("--note", default="")
+    tasks_qa.set_defaults(func=command_tasks)
+
+    tasks_close = tasks_sub.add_parser("close")
+    tasks_close.add_argument("task_id")
+    tasks_close.add_argument("--actor", required=True)
+    tasks_close.add_argument("--note", default="")
+    tasks_close.set_defaults(func=command_tasks)
 
     telemetry = subparsers.add_parser("telemetry")
     telemetry_sub = telemetry.add_subparsers(dest="telemetry_command", required=True)

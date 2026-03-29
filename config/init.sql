@@ -78,3 +78,105 @@ CREATE TABLE IF NOT EXISTS mining_cohorts (
 
 CREATE INDEX IF NOT EXISTS idx_mining_cohorts_created_at
     ON mining_cohorts(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS tracks (
+    track_id VARCHAR(64) PRIMARY KEY,
+    scene_token VARCHAR(64) NOT NULL REFERENCES scenes(scene_token) ON DELETE CASCADE,
+    scene_name VARCHAR(64) NOT NULL,
+    location VARCHAR(64) NOT NULL,
+    category VARCHAR(128) NOT NULL,
+    start_timestamp BIGINT NOT NULL,
+    end_timestamp BIGINT NOT NULL,
+    sample_ids INTEGER[] NOT NULL DEFAULT '{}',
+    sample_count INTEGER NOT NULL DEFAULT 0,
+    annotation_count INTEGER NOT NULL DEFAULT 0,
+    avg_num_lidar_pts DOUBLE PRECISION NOT NULL DEFAULT 0,
+    avg_num_radar_pts DOUBLE PRECISION NOT NULL DEFAULT 0,
+    max_num_lidar_pts INTEGER NOT NULL DEFAULT 0,
+    max_num_radar_pts INTEGER NOT NULL DEFAULT 0,
+    visibility_tokens VARCHAR(16)[] NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tracks_scene_category
+    ON tracks(scene_token, category);
+
+CREATE INDEX IF NOT EXISTS idx_tracks_location
+    ON tracks(location);
+
+CREATE TABLE IF NOT EXISTS track_observations (
+    id BIGSERIAL PRIMARY KEY,
+    track_id VARCHAR(64) NOT NULL REFERENCES tracks(track_id) ON DELETE CASCADE,
+    sample_idx INTEGER NOT NULL REFERENCES samples(sample_idx) ON DELETE CASCADE,
+    sample_token VARCHAR(64) NOT NULL,
+    annotation_token VARCHAR(64) NOT NULL,
+    observation_idx INTEGER NOT NULL,
+    timestamp BIGINT NOT NULL,
+    category VARCHAR(128) NOT NULL,
+    translation DOUBLE PRECISION[],
+    size DOUBLE PRECISION[],
+    rotation DOUBLE PRECISION[],
+    num_lidar_pts INTEGER NOT NULL DEFAULT 0,
+    num_radar_pts INTEGER NOT NULL DEFAULT 0,
+    visibility_token VARCHAR(16) NOT NULL DEFAULT '',
+    attribute_tokens VARCHAR(64)[] NOT NULL DEFAULT '{}',
+    UNIQUE(track_id, sample_idx, annotation_token)
+);
+
+CREATE INDEX IF NOT EXISTS idx_track_observations_track_sample
+    ON track_observations(track_id, sample_idx);
+
+CREATE INDEX IF NOT EXISTS idx_track_observations_timestamp
+    ON track_observations(timestamp);
+
+CREATE TABLE IF NOT EXISTS review_tasks (
+    task_id VARCHAR(32) PRIMARY KEY,
+    source_type VARCHAR(24) NOT NULL CHECK (source_type IN ('cohort', 'track', 'manual')),
+    source_id VARCHAR(64),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status VARCHAR(24) NOT NULL CHECK (
+        status IN ('queued', 'assigned', 'in_progress', 'submitted', 'qa_failed', 'qa_passed', 'closed')
+    ),
+    assignee TEXT NOT NULL DEFAULT '',
+    priority VARCHAR(16) NOT NULL DEFAULT 'normal',
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    submitted_at TIMESTAMPTZ,
+    closed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_tasks_status_created
+    ON review_tasks(status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_review_tasks_source
+    ON review_tasks(source_type, source_id);
+
+CREATE TABLE IF NOT EXISTS task_events (
+    id BIGSERIAL PRIMARY KEY,
+    task_id VARCHAR(32) NOT NULL REFERENCES review_tasks(task_id) ON DELETE CASCADE,
+    event_type VARCHAR(32) NOT NULL,
+    actor TEXT NOT NULL DEFAULT '',
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_events_task_created
+    ON task_events(task_id, created_at);
+
+CREATE TABLE IF NOT EXISTS cohort_exports (
+    export_id VARCHAR(32) PRIMARY KEY,
+    cohort_id VARCHAR(32) REFERENCES mining_cohorts(cohort_id) ON DELETE CASCADE,
+    task_id VARCHAR(32) REFERENCES review_tasks(task_id) ON DELETE SET NULL,
+    export_format VARCHAR(16) NOT NULL,
+    manifest_version VARCHAR(16) NOT NULL DEFAULT 'v1',
+    output_path TEXT NOT NULL,
+    row_count INTEGER NOT NULL DEFAULT 0,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cohort_exports_cohort_created
+    ON cohort_exports(cohort_id, created_at DESC);

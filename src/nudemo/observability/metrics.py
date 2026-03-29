@@ -6,7 +6,9 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+import psycopg
 from fastapi import FastAPI, Request, Response
+from psycopg.rows import dict_row
 
 from nudemo.config import PostgresSettings
 from nudemo.telemetry.store import fetch_latest_span_rows, fetch_run_bundle
@@ -14,6 +16,8 @@ from nudemo.telemetry.store import fetch_latest_span_rows, fetch_run_bundle
 _START_LOCK = threading.Lock()
 _EXPORTER_STARTED = False
 _METER = None
+_WORKFLOW_LATENCY = None
+_WORKFLOW_EVENT_COUNTER = None
 
 
 @dataclass(slots=True)
@@ -156,6 +160,62 @@ def build_service_measurements(
     return measurements
 
 
+def build_review_measurements(settings: PostgresSettings) -> list[tuple[float, dict[str, str]]]:
+    try:
+        with psycopg.connect(settings.dsn, row_factory=dict_row) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT status, COUNT(*) AS count
+                    FROM review_tasks
+                    GROUP BY status
+                    """
+                )
+                task_rows = [dict(row) for row in cursor.fetchall()]
+                cursor.execute("SELECT COUNT(*) AS count FROM cohort_exports")
+                export_count = int((cursor.fetchone() or {}).get("count") or 0)
+                cursor.execute("SELECT COUNT(*) AS count FROM tracks")
+                track_count = int((cursor.fetchone() or {}).get("count") or 0)
+                cursor.execute("SELECT COUNT(*) AS count FROM track_observations")
+                observation_count = int((cursor.fetchone() or {}).get("count") or 0)
+                cursor.execute(
+                    """
+                    SELECT
+                        AVG(
+                            EXTRACT(
+                                EPOCH FROM (
+                                    COALESCE(closed_at, submitted_at, updated_at) - created_at
+                                )
+                            )
+                        ) AS avg_cycle_sec
+                    FROM review_tasks
+                    WHERE status IN ('submitted', 'qa_passed', 'closed')
+                    """
+                )
+                cycle_row = dict(cursor.fetchone() or {})
+    except Exception:
+        return []
+
+    measurements: list[tuple[float, dict[str, str]]] = []
+    for row in task_rows:
+        measurements.append(
+            (
+                float(row.get("count") or 0.0),
+                {
+                    "metric_name": "task_count",
+                    "status": str(row.get("status") or "unknown"),
+                },
+            )
+        )
+    measurements.append((float(export_count), {"metric_name": "cohort_export_count"}))
+    measurements.append((float(track_count), {"metric_name": "track_count"}))
+    measurements.append((float(observation_count), {"metric_name": "track_observation_count"}))
+    avg_cycle_sec = cycle_row.get("avg_cycle_sec")
+    if isinstance(avg_cycle_sec, int | float):
+        measurements.append((float(avg_cycle_sec), {"metric_name": "avg_task_cycle_sec"}))
+    return measurements
+
+
 def ensure_metrics_exporter(settings: PostgresSettings) -> None:
     if not _metrics_enabled():
         return
@@ -217,6 +277,12 @@ def ensure_metrics_exporter(settings: PostgresSettings) -> None:
                 for value, attributes in build_service_measurements(run_id, bundle.snapshots)
             ]
 
+        def review_callback(_options):
+            return [
+                Observation(value, attributes=attributes)
+                for value, attributes in build_review_measurements(settings)
+            ]
+
         meter.create_observable_gauge(
             "nudemo_latest_run_metric_value",
             callbacks=[run_callback],
@@ -231,6 +297,11 @@ def ensure_metrics_exporter(settings: PostgresSettings) -> None:
             "nudemo_latest_service_metric_value",
             callbacks=[service_callback],
             description="Latest Docker service snapshot values exported from persisted telemetry.",
+        )
+        meter.create_observable_gauge(
+            "nudemo_review_metric_value",
+            callbacks=[review_callback],
+            description="Review workflow counts and cohort export counts.",
         )
         _METER = meter
         _EXPORTER_STARTED = True
@@ -272,6 +343,42 @@ def install_http_metrics(app: FastAPI) -> None:
             }
             counter.add(1, attributes)
             latency.record(elapsed_ms, attributes)
+
+
+def record_workflow_latency(metric_name: str, value_ms: float, **attributes: str) -> None:
+    if not _metrics_enabled():
+        return
+
+    from opentelemetry import metrics
+
+    global _WORKFLOW_LATENCY
+    meter = _METER or metrics.get_meter("nudemo.observability", "0.1.0")
+    if _WORKFLOW_LATENCY is None:
+        _WORKFLOW_LATENCY = meter.create_histogram(
+            "nudemo_workflow_latency_ms",
+            unit="ms",
+            description=(
+                "Workflow-specific latencies for track search, task actions, "
+                "exports, and browser timings."
+            ),
+        )
+    _WORKFLOW_LATENCY.record(float(value_ms), {"metric_name": metric_name, **attributes})
+
+
+def record_workflow_event(metric_name: str, value: int = 1, **attributes: str) -> None:
+    if not _metrics_enabled():
+        return
+
+    from opentelemetry import metrics
+
+    global _WORKFLOW_EVENT_COUNTER
+    meter = _METER or metrics.get_meter("nudemo.observability", "0.1.0")
+    if _WORKFLOW_EVENT_COUNTER is None:
+        _WORKFLOW_EVENT_COUNTER = meter.create_counter(
+            "nudemo_workflow_event_total",
+            description="Workflow event counts for review tasks and browser-side timings.",
+        )
+    _WORKFLOW_EVENT_COUNTER.add(int(value), {"metric_name": metric_name, **attributes})
 
 
 def _pack_numeric_values(
