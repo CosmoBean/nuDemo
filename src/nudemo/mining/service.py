@@ -75,36 +75,18 @@ class MiningSearchService:
         )
 
         total = 0
-        batch_docs: list[dict[str, object]] = []
+        batch_rows: list[dict[str, object]] = []
         with psycopg.connect(self._config.services.postgres.dsn, row_factory=dict_row) as connection:
             with connection.cursor(name="mining_index_cursor") as cursor:
                 cursor.itersize = max(1, min(batch_size, 128))
                 cursor.execute(self._index_sql(limit=limit, scene_limit=scene_limit))
                 for row in cursor:
-                    camera_payloads = {
-                        name: self._fetch_object(client, row[column])
-                        for name, column in CAMERA_PATH_COLUMNS.items()
-                        if row.get(column)
-                    }
-                    lidar_payload = self._fetch_object(client, row[LIDAR_PATH_COLUMN]) if row.get(LIDAR_PATH_COLUMN) else None
-                    radar_payloads = {
-                        name: self._fetch_object(client, row[column])
-                        for name, column in RADAR_PATH_COLUMNS.items()
-                        if row.get(column)
-                    }
-                    metadata_text = build_metadata_text(row)
-                    vectors = self._encoder.encode_sample_payloads(
-                        camera_payloads=camera_payloads,
-                        lidar_payload=lidar_payload,
-                        radar_payloads=radar_payloads,
-                        metadata_text=metadata_text,
-                    )
-                    batch_docs.append(self._build_document(row, vectors))
-                    if len(batch_docs) >= batch_size:
-                        total += self._es.bulk_index_documents(batch_docs)
-                        batch_docs = []
-                if batch_docs:
-                    total += self._es.bulk_index_documents(batch_docs)
+                    batch_rows.append(dict(row))
+                    if len(batch_rows) >= batch_size:
+                        total += self._index_batch_rows(client, batch_rows)
+                        batch_rows = []
+                if batch_rows:
+                    total += self._index_batch_rows(client, batch_rows)
 
         return {
             "indexed": total,
@@ -112,6 +94,36 @@ class MiningSearchService:
             "encoder_backend": self._encoder.backend,
             "encoder_model": self._encoder.model_name,
         }
+
+    def _index_batch_rows(self, client: Minio, rows: list[dict[str, object]]) -> int:
+        payloads = []
+        for row in rows:
+            payloads.append(
+                {
+                    "camera_payloads": {
+                        name: self._fetch_object(client, row[column])
+                        for name, column in CAMERA_PATH_COLUMNS.items()
+                        if row.get(column)
+                    },
+                    "lidar_payload": (
+                        self._fetch_object(client, row[LIDAR_PATH_COLUMN])
+                        if row.get(LIDAR_PATH_COLUMN)
+                        else None
+                    ),
+                    "radar_payloads": {
+                        name: self._fetch_object(client, row[column])
+                        for name, column in RADAR_PATH_COLUMNS.items()
+                        if row.get(column)
+                    },
+                    "metadata_text": build_metadata_text(row),
+                }
+            )
+        vectors = self._encoder.encode_sample_payload_batch(payloads)
+        documents = [
+            self._build_document(row, vector)
+            for row, vector in zip(rows, vectors, strict=False)
+        ]
+        return self._es.bulk_index_documents(documents)
 
     def search(
         self,

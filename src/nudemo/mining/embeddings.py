@@ -154,6 +154,24 @@ class MultimodalEmbeddingEncoder:
             return _to_numpy_unit(vector[0])
         return _hashed_text_vector(text)
 
+    def encode_texts(self, texts: list[str], *, chunk_size: int = 32) -> list[np.ndarray]:
+        if not texts:
+            return []
+        self._ensure_backend()
+        if self._backend != "openclip":
+            return [_hashed_text_vector(text) for text in texts]
+
+        vectors: list[np.ndarray] = []
+        for offset in range(0, len(texts), max(1, chunk_size)):
+            chunk = texts[offset : offset + max(1, chunk_size)]
+            tokens = self._tokenizer(chunk).to(self.device)
+            with self._torch.no_grad():
+                encoded = self._model.encode_text(tokens)
+            vectors.extend(
+                _to_numpy_unit(vector) for vector in encoded
+            )
+        return vectors
+
     def encode_image(self, image: Image.Image) -> np.ndarray:
         self._ensure_backend()
         if self._backend == "openclip":
@@ -167,6 +185,34 @@ class MultimodalEmbeddingEncoder:
         image = Image.open(io.BytesIO(payload)).convert("RGB")
         return self.encode_image(image)
 
+    def encode_image_list(
+        self,
+        images: list[Image.Image],
+        *,
+        chunk_size: int = 32,
+    ) -> list[np.ndarray]:
+        if not images:
+            return []
+        self._ensure_backend()
+        if self._backend == "openclip":
+            vectors: list[np.ndarray] = []
+            effective_chunk = max(1, chunk_size)
+            for offset in range(0, len(images), effective_chunk):
+                chunk = images[offset : offset + effective_chunk]
+                batch = self._torch.stack(
+                    [self._preprocess(image.convert("RGB")) for image in chunk]
+                ).to(self.device)
+                with self._torch.no_grad():
+                    encoded = self._model.encode_image(batch)
+                vectors.extend(_to_numpy_unit(vector) for vector in encoded)
+            return vectors
+        return [_fallback_image_vector(image) for image in images]
+
+    def encode_images(self, images: list[Image.Image]) -> np.ndarray:
+        if not images:
+            return _zero_vector()
+        return _average_vectors(self.encode_image_list(images))
+
     def encode_sample_payloads(
         self,
         *,
@@ -175,8 +221,12 @@ class MultimodalEmbeddingEncoder:
         radar_payloads: dict[str, bytes],
         metadata_text: str,
     ) -> EncodedSampleVectors:
-        image_vecs = [self.encode_image_bytes(payload) for payload in camera_payloads.values() if payload]
-        image_vec = _average_vectors(image_vecs)
+        camera_images = [
+            Image.open(io.BytesIO(payload)).convert("RGB")
+            for payload in camera_payloads.values()
+            if payload
+        ]
+        image_vec = self.encode_images(camera_images)
 
         lidar_vec = _zero_vector()
         if lidar_payload:
@@ -213,11 +263,104 @@ class MultimodalEmbeddingEncoder:
             fused_vec=fused_vec,
             encoder_backend=self.backend,
             encoder_model=self.model_name if self.backend == "openclip" else "fallback-hash",
-            has_image=bool(image_vecs),
+            has_image=bool(camera_images),
             has_lidar=bool(lidar_payload),
             has_radar=bool(radar_payloads),
             has_metadata=bool(metadata_text),
         )
+
+    def encode_sample_payload_batch(
+        self,
+        payloads: list[dict[str, Any]],
+    ) -> list[EncodedSampleVectors]:
+        if not payloads:
+            return []
+
+        camera_groups: list[list[Image.Image]] = []
+        grouped_camera_lengths: list[int] = []
+        flat_camera_images: list[Image.Image] = []
+        lidar_images: list[Image.Image | None] = []
+        radar_images: list[Image.Image | None] = []
+        metadata_texts: list[str] = []
+
+        for payload in payloads:
+            cameras = [
+                Image.open(io.BytesIO(camera_payload)).convert("RGB")
+                for camera_payload in (payload.get("camera_payloads") or {}).values()
+                if camera_payload
+            ]
+            camera_groups.append(cameras)
+            grouped_camera_lengths.append(len(cameras))
+            flat_camera_images.extend(cameras)
+
+            lidar_payload = payload.get("lidar_payload")
+            if lidar_payload:
+                try:
+                    lidar_points = np.load(io.BytesIO(lidar_payload), allow_pickle=False)
+                    lidar_images.append(_lidar_to_bev_image(lidar_points))
+                except Exception:
+                    lidar_images.append(None)
+            else:
+                lidar_images.append(None)
+
+            radar_payloads = payload.get("radar_payloads") or {}
+            radar_arrays: list[np.ndarray] = []
+            for radar_payload in radar_payloads.values():
+                if not radar_payload:
+                    continue
+                try:
+                    radar_arrays.append(np.load(io.BytesIO(radar_payload), allow_pickle=False))
+                except Exception:
+                    continue
+            radar_images.append(_radar_to_bev_image(radar_arrays) if radar_arrays else None)
+            metadata_texts.append(str(payload.get("metadata_text") or ""))
+
+        flat_camera_vectors = self.encode_image_list(flat_camera_images)
+        camera_vectors: list[np.ndarray] = []
+        cursor = 0
+        for length in grouped_camera_lengths:
+            group_vectors = flat_camera_vectors[cursor : cursor + length]
+            cursor += length
+            camera_vectors.append(_average_vectors(group_vectors))
+
+        lidar_vectors = _encode_optional_images(self, lidar_images)
+        radar_vectors = _encode_optional_images(self, radar_images)
+        metadata_vectors = [
+            vector if text else _zero_vector()
+            for text, vector in zip(metadata_texts, self.encode_texts(metadata_texts), strict=False)
+        ]
+
+        results: list[EncodedSampleVectors] = []
+        for idx in range(len(payloads)):
+            image_vec = camera_vectors[idx]
+            lidar_vec = lidar_vectors[idx]
+            radar_vec = radar_vectors[idx]
+            metadata_vec = metadata_vectors[idx]
+            fused_vec = _average_vectors(
+                [
+                    vector
+                    for vector in (image_vec, lidar_vec, radar_vec, metadata_vec)
+                    if np.linalg.norm(vector) > 0
+                ]
+            )
+            results.append(
+                EncodedSampleVectors(
+                    image_vec=image_vec,
+                    lidar_vec=lidar_vec,
+                    radar_vec=radar_vec,
+                    metadata_vec=metadata_vec,
+                    fused_vec=fused_vec,
+                    encoder_backend=self.backend,
+                    encoder_model=(
+                        self.model_name if self.backend == "openclip" else "fallback-hash"
+                    ),
+                    has_image=bool(grouped_camera_lengths[idx]),
+                    has_lidar=lidar_images[idx] is not None,
+                    has_radar=radar_images[idx] is not None,
+                    has_metadata=bool(metadata_texts[idx]),
+                )
+            )
+        return results
 
     def _ensure_backend(self) -> None:
         if self._ready:
@@ -268,6 +411,23 @@ def _l2_normalize(vector: np.ndarray) -> np.ndarray:
 
 def _to_numpy_unit(vector: Any) -> np.ndarray:
     return _l2_normalize(vector.detach().cpu().numpy().astype(np.float32))
+
+
+def _encode_optional_images(
+    encoder: MultimodalEmbeddingEncoder,
+    images: list[Image.Image | None],
+) -> list[np.ndarray]:
+    actual_images = [image for image in images if image is not None]
+    actual_vectors = encoder.encode_image_list(actual_images)
+    result: list[np.ndarray] = []
+    cursor = 0
+    for image in images:
+        if image is None:
+            result.append(_zero_vector())
+            continue
+        result.append(actual_vectors[cursor])
+        cursor += 1
+    return result
 
 
 def _hashed_text_vector(text: str) -> np.ndarray:
