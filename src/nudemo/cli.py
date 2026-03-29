@@ -772,7 +772,12 @@ def command_tasks(args: argparse.Namespace) -> int:
     subcommand = args.tasks_command
 
     if subcommand == "list":
-        payload = store.list_tasks(status=args.status, limit=args.limit)
+        payload = store.list_tasks(
+            status=args.status,
+            source_type=args.source_type,
+            source_id=args.source_id,
+            limit=args.limit,
+        )
         print(json.dumps(payload, indent=2, default=str))
         return 0
     if subcommand == "create":
@@ -1006,6 +1011,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     tasks_list = tasks_sub.add_parser("list")
     tasks_list.add_argument("--status", default=None, choices=list(TASK_STATUSES))
+    tasks_list.add_argument("--source-type", default=None, choices=["cohort", "track", "manual"])
+    tasks_list.add_argument("--source-id", default=None)
     tasks_list.add_argument("--limit", type=int, default=50)
     tasks_list.set_defaults(func=command_tasks)
 

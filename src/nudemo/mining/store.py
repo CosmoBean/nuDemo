@@ -757,6 +757,8 @@ class ReviewTaskStore(PostgresStore):
         self,
         *,
         status: str | None = None,
+        source_type: str | None = None,
+        source_id: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, object]]:
         with self._connection() as connection, connection.cursor() as cursor:
@@ -768,6 +770,8 @@ class ReviewTaskStore(PostgresStore):
                 FROM review_tasks t
                 LEFT JOIN task_events e ON e.task_id = t.task_id
                 WHERE (%s::text IS NULL OR t.status = %s::text)
+                  AND (%s::text IS NULL OR t.source_type = %s::text)
+                  AND (%s::text IS NULL OR t.source_id = %s::text)
                 GROUP BY t.task_id
                 ORDER BY
                     CASE t.status
@@ -785,6 +789,10 @@ class ReviewTaskStore(PostgresStore):
                 (
                     status if status else None,
                     status if status else None,
+                    source_type if source_type else None,
+                    source_type if source_type else None,
+                    source_id if source_id else None,
+                    source_id if source_id else None,
                     max(1, min(limit, 200)),
                 ),
             )

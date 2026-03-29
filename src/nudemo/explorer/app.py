@@ -20,11 +20,20 @@ from nudemo.explorer.media import (
 )
 from nudemo.mining import (
     MODALITY_PRESETS,
+    CohortExportService,
     MiningSearchService,
     MiningSessionStore,
+    ReviewTaskStore,
+    TrackStore,
+    fetch_workflow_metrics,
     resolve_modality_weights,
 )
-from nudemo.observability import ensure_metrics_exporter, install_http_metrics
+from nudemo.observability import (
+    ensure_metrics_exporter,
+    install_http_metrics,
+    record_workflow_event,
+    record_workflow_latency,
+)
 from nudemo.reporting.dashboard import (
     build_comparison_note,
     build_dashboard_html,
@@ -32,6 +41,7 @@ from nudemo.reporting.dashboard import (
     build_storage_format_rows,
 )
 from nudemo.storage.elasticsearch_store import ElasticsearchBackend
+from nudemo.storage.track_elasticsearch_store import TrackElasticsearchBackend
 
 JSON_BODY = Body(default=None)
 
@@ -532,6 +542,13 @@ def _session_response(payload: dict[str, Any]) -> dict[str, Any]:
     return response
 
 
+def _task_response(payload: dict[str, Any]) -> dict[str, Any]:
+    response = dict(payload)
+    response["event_count"] = int(response.get("event_count") or len(response.get("events") or []))
+    response["metadata"] = dict(response.get("metadata") or {})
+    return response
+
+
 def build_browser_home_html() -> str:
     return """
 <!doctype html>
@@ -894,6 +911,10 @@ def build_browser_home_html() -> str:
               <a href="/scene-studio">Open</a>
             </div>
             <div class="link-row">
+              <span>Review tasks</span>
+              <a href="/tasks">Open</a>
+            </div>
+            <div class="link-row">
               <span>Grafana observability</span>
               <a href="/open-grafana">Open</a>
             </div>
@@ -917,6 +938,11 @@ def build_browser_home_html() -> str:
           <strong>Scene Studio</strong>
           Step through a scene with a 3D LiDAR point-cloud viewer.
           <a href="/scene-studio">Open</a>
+        </section>
+        <section class="card">
+          <strong>Tasks</strong>
+          Create review queues from tracks and saved cohorts.
+          <a href="/tasks">Open</a>
         </section>
         <section class="card">
           <strong>Grafana</strong>
@@ -991,12 +1017,13 @@ def build_browser_home_html() -> str:
             <div class="pipe-node">
               <div class="pipe-step">04</div>
               <div class="pipe-body">
-                <div class="pipe-name">Workloads</div>
+                <div class="pipe-name">Search and review</div>
                 <div class="op-chips">
-                  <span class="op-chip">sequential scan</span>
-                  <span class="op-chip">random access</span>
-                  <span class="op-chip">curation query</span>
-                  <span class="op-chip">explorer UI</span>
+                  <span class="op-chip">sample search</span>
+                  <span class="op-chip">track search</span>
+                  <span class="op-chip">scene studio</span>
+                  <span class="op-chip">review tasks</span>
+                  <span class="op-chip">cohort exports</span>
                 </div>
               </div>
             </div>
@@ -1625,6 +1652,7 @@ def build_explorer_html() -> str:
       <div class="subnav">
         <a href="/">Browser home</a>
         <a href="/scene-studio">Scene studio</a>
+        <a href="/tasks">Review tasks</a>
         <a href="/compare">Compare backends</a>
         <a href="/open-grafana">Grafana</a>
       </div>
@@ -1733,6 +1761,14 @@ def build_explorer_html() -> str:
 
           <div class="results-head">
             <div>
+              <h2 style="margin-bottom: 4px;">Matching tracks</h2>
+              <span id="track_meta">Track search follows the same query and filters.</span>
+            </div>
+          </div>
+          <div id="track_results" class="results-grid"></div>
+
+          <div class="results-head">
+            <div>
               <h2 style="margin-bottom: 4px;">Loaded samples</h2>
               <span id="result_meta">Waiting for data...</span>
             </div>
@@ -1770,6 +1806,7 @@ def build_explorer_html() -> str:
       };
       const state = {
         q: initialParams.get("q") || "",
+        cohortId: initialParams.get("cohort_id") || "",
         scene: initialParams.get("scene_token") || "",
         location: initialParams.get("location") || "",
         category: initialParams.get("category") || "",
@@ -1784,6 +1821,7 @@ def build_explorer_html() -> str:
         positiveIds: parseIds(initialParams.get("positive_ids")),
         negativeIds: parseIds(initialParams.get("negative_ids")),
         currentResults: [],
+        currentTracks: [],
       };
 
       const el = {
@@ -1809,6 +1847,8 @@ def build_explorer_html() -> str:
         summary: document.getElementById("summary"),
         topLocations: document.getElementById("top_locations"),
         topCategories: document.getElementById("top_categories"),
+        trackResults: document.getElementById("track_results"),
+        trackMeta: document.getElementById("track_meta"),
         results: document.getElementById("results"),
         resultMeta: document.getElementById("result_meta"),
         pageMeta: document.getElementById("page_meta"),
@@ -1835,6 +1875,7 @@ def build_explorer_html() -> str:
       function paramsFromState() {
         const params = new URLSearchParams();
         if (state.q) params.set("q", state.q);
+        if (state.cohortId) params.set("cohort_id", state.cohortId);
         if (state.scene) params.set("scene_token", state.scene);
         if (state.location) params.set("location", state.location);
         if (state.category) params.set("category", state.category);
@@ -1962,6 +2003,57 @@ def build_explorer_html() -> str:
         await loadMiningOverview();
       }
 
+      async function loadCohort(cohortId, options = {}) {
+        const cohort = await requestJson(`/api/mining/cohorts/${encodeURIComponent(cohortId)}`);
+        state.cohortId = cohort.cohort_id || cohortId;
+        state.q = cohort.query || "";
+        state.scene = cohort.filters?.scene_token || "";
+        state.location = cohort.filters?.location || "";
+        state.category = cohort.filters?.category || "";
+        state.minAnnotations = Number(cohort.filters?.min_annotations || 0);
+        state.offset = 0;
+        el.q.value = state.q;
+        el.scene.value = state.scene;
+        el.location.value = state.location;
+        el.category.value = state.category;
+        el.minAnnotations.value = String(state.minAnnotations);
+        const sampleIds = cohort.sample_ids || [];
+        state.positiveIds = sampleIds.length
+          ? sampleIds.slice(0, Math.min(sampleIds.length, 8))
+          : [];
+        state.negativeIds = [];
+        renderExampleChips();
+        if (options.notice !== false) {
+          showNotice(`Loaded cohort ${cohort.name}.`);
+        }
+        return cohort;
+      }
+
+      async function createReviewTask(sourceType, sourceId, title, description = "") {
+        const payload = await requestJson("/api/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source_type: sourceType,
+            source_id: sourceId,
+            title,
+            description,
+            priority: "normal",
+          }),
+        });
+        showNotice(`Created task ${payload.task_id}.`);
+        return payload;
+      }
+
+      async function exportCohort(cohortId) {
+        const payload = await requestJson(`/api/cohorts/${encodeURIComponent(cohortId)}/export`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        showNotice(`Exported cohort to ${payload.output_path || payload.export?.output_path || "artifact"}.`);
+      }
+
       async function markExample(sampleIdx, polarity) {
         const targetKey = polarity === "positive" ? "positiveIds" : "negativeIds";
         const oppositeKey = polarity === "positive" ? "negativeIds" : "positiveIds";
@@ -2027,13 +2119,18 @@ def build_explorer_html() -> str:
               <strong style="display:block;color:var(--ink);margin-bottom:6px;">${cohort.name}</strong>
               <span>${(cohort.sample_ids || []).length} samples · ${cohort.query || "saved cohort"}</span>
             </div>
-            <button class="secondary" data-load-cohort="${cohort.cohort_id}">Load</button>
+            <div style="display:grid;gap:8px;">
+              <button class="secondary" data-load-cohort="${cohort.cohort_id}">Load</button>
+              <button class="secondary" data-task-cohort="${cohort.cohort_id}" data-task-title="${cohort.name} review">Task</button>
+              <button class="secondary" data-export-cohort="${cohort.cohort_id}">Export</button>
+            </div>
           </li>
         `).join("") : `<li><span>No cohorts saved yet.</span></li>`;
 
         document.querySelectorAll("[data-load-session]").forEach((node) => {
           node.addEventListener("click", async () => {
             const payload = await requestJson(`/api/mining/sessions/${encodeURIComponent(node.dataset.loadSession)}`);
+            state.cohortId = "";
             state.sessionId = payload.session_id || "";
             state.sessionName = payload.label || "";
             state.q = payload.query || "";
@@ -2053,18 +2150,28 @@ def build_explorer_html() -> str:
 
         document.querySelectorAll("[data-load-cohort]").forEach((node) => {
           node.addEventListener("click", async () => {
-            const cohort = await requestJson(`/api/mining/cohorts/${encodeURIComponent(node.dataset.loadCohort)}`);
-            state.q = cohort.query || "";
-            el.q.value = state.q;
-            state.offset = 0;
-            const sampleIds = cohort.sample_ids || [];
-            if (sampleIds.length) {
-              state.positiveIds = sampleIds.slice(0, Math.min(sampleIds.length, 8));
-              state.negativeIds = [];
-              renderExampleChips();
-            }
-            showNotice(`Loaded cohort ${cohort.name}.`);
+            await loadCohort(node.dataset.loadCohort);
             await refresh(true);
+          });
+        });
+
+        document.querySelectorAll("[data-task-cohort]").forEach((node) => {
+          node.addEventListener("click", async () => {
+            try {
+              await createReviewTask("cohort", node.dataset.taskCohort, node.dataset.taskTitle || "cohort review");
+            } catch (error) {
+              showNotice(error.message);
+            }
+          });
+        });
+
+        document.querySelectorAll("[data-export-cohort]").forEach((node) => {
+          node.addEventListener("click", async () => {
+            try {
+              await exportCohort(node.dataset.exportCohort);
+            } catch (error) {
+              showNotice(error.message);
+            }
           });
         });
       }
@@ -2125,6 +2232,59 @@ def build_explorer_html() -> str:
           pieces.push(`${String(row.scenes)} scenes`);
         }
         return pieces.join(" · ") || "scope unavailable";
+      }
+
+      function renderTrackResults(payload) {
+        state.currentTracks = payload.items || [];
+        const total = payload.total || 0;
+        el.trackMeta.textContent = total
+          ? `${total} matching tracks`
+          : "No track matches for the current query.";
+
+        if (!payload.items?.length) {
+          el.trackResults.innerHTML = `<section class="panel sample-card"><div class="body"><h3>No tracks match the current filters.</h3><div class="meta-list">Track search uses the same scene, location, and category filters as the sample search.</div></div></section>`;
+          return;
+        }
+
+        el.trackResults.innerHTML = payload.items.map((track) => `
+          <article class="panel sample-card" data-track="${track.track_id}">
+            ${track.preview_url ? `<img loading="lazy" src="${track.preview_url}" alt="Track ${track.track_id}">` : `<div style="aspect-ratio:16/9;background:#2a2938;"></div>`}
+            <div class="body">
+              <h3>${track.category} · ${track.scene_name}</h3>
+              <div class="meta-list">
+                <span><strong style="color:var(--ink);">Track</strong> <code>${track.track_id.slice(0, 12)}</code></span>
+                <span><strong style="color:var(--ink);">Location</strong> ${track.location}</span>
+                <span><strong style="color:var(--ink);">Samples</strong> ${track.sample_count}</span>
+                <span><strong style="color:var(--ink);">Annotations</strong> ${track.annotation_count}</span>
+              </div>
+              <div class="chip-row">
+                <span class="chip">${formatMetric(track.avg_num_lidar_pts, 0)} avg LiDAR pts</span>
+                <span class="chip">${formatMetric(track.avg_num_radar_pts, 0)} avg radar pts</span>
+              </div>
+              <div class="sample-actions">
+                <button class="secondary" data-open-track="${track.track_id}">Open track</button>
+                <button class="secondary" data-task-track="${track.track_id}" data-track-title="${track.category} review">Create task</button>
+              </div>
+            </div>
+          </article>
+        `).join("");
+
+        document.querySelectorAll("[data-open-track]").forEach((node) => {
+          node.addEventListener("click", (event) => {
+            event.stopPropagation();
+            window.location.href = `/scene-studio?track_id=${encodeURIComponent(node.dataset.openTrack)}`;
+          });
+        });
+        document.querySelectorAll("[data-task-track]").forEach((node) => {
+          node.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            try {
+              await createReviewTask("track", node.dataset.taskTrack, node.dataset.trackTitle || "track review");
+            } catch (error) {
+              showNotice(error.message);
+            }
+          });
+        });
       }
 
       function renderResults(payload) {
@@ -2313,6 +2473,17 @@ def build_explorer_html() -> str:
         renderFilterOptions(filters);
       }
 
+      async function loadTracks() {
+        const params = new URLSearchParams();
+        if (state.q) params.set("q", state.q);
+        if (state.scene) params.set("scene_token", state.scene);
+        if (state.location) params.set("location", state.location);
+        if (state.category) params.set("category", state.category);
+        params.set("limit", String(Math.min(state.limit, 12)));
+        const payload = await requestJson(`/api/tracks/search?${params.toString()}`);
+        renderTrackResults(payload);
+      }
+
       async function loadResults() {
         let payload;
         if (isMiningActive()) {
@@ -2355,7 +2526,7 @@ def build_explorer_html() -> str:
         if (resetOffset) state.offset = 0;
         try {
           showNotice("");
-          await Promise.all([loadSummary(), loadResults(), loadMiningOverview()]);
+          await Promise.all([loadSummary(), loadTracks(), loadResults(), loadMiningOverview()]);
         } catch (error) {
           showNotice(error.message);
         }
@@ -2371,6 +2542,7 @@ def build_explorer_html() -> str:
         el.limit.value = "24";
         el.retrievalMode.value = "hybrid";
         el.modalityPreset.value = "balanced";
+        state.cohortId = "";
         state.positiveIds = [];
         state.negativeIds = [];
         state.offset = 0;
@@ -2410,11 +2582,517 @@ def build_explorer_html() -> str:
           if (state.sessionId) {
             setSessionMeta(`Session ${state.sessionId} loaded from URL.`);
           }
+          if (state.cohortId) {
+            await loadCohort(state.cohortId, { notice: false });
+          }
           await refresh(true);
         } catch (error) {
           showNotice(error.message);
         }
       })();
+    </script>
+  </body>
+</html>
+"""
+
+
+def build_tasks_html() -> str:
+    return """
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>nuDemo Tasks</title>
+    <style>
+      :root {
+        --bg: #0b0b10;
+        --panel: #161622;
+        --line: #544bb0;
+        --ink: #e7e8f3;
+        --muted: #b5b0cf;
+        --accent: #6b59dd;
+        --accent-soft: #201f31;
+        --shadow: 6px 6px 0 #211b52;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        font-family: "Ubuntu Mono", "IBM Plex Mono", monospace;
+        background:
+          radial-gradient(circle at top right, rgba(84, 54, 252, 0.12), transparent 22%),
+          linear-gradient(180deg, #0f0f16 0%, var(--bg) 100%);
+      }
+      main {
+        max-width: 1480px;
+        margin: 0 auto;
+        padding: 28px 20px 52px;
+      }
+      .subnav {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+      }
+      .subnav a {
+        color: var(--ink);
+        font-weight: 600;
+        text-decoration: none;
+        padding: 10px 12px;
+        border: 3px solid var(--line);
+        border-radius: 999px;
+        background: var(--accent-soft);
+        box-shadow: 4px 4px 0 #211b52;
+      }
+      .panel {
+        background: var(--panel);
+        border: 3px solid var(--line);
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+      }
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(320px, 420px);
+        gap: 18px;
+        margin-bottom: 18px;
+      }
+      .hero-copy, .hero-meta, .composer, .column, .detail {
+        padding: 18px;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: clamp(2rem, 4vw, 3.4rem);
+        line-height: 1.02;
+        letter-spacing: -0.04em;
+      }
+      h2, h3 { margin: 0 0 10px; }
+      p, label, span {
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 2px solid var(--line);
+        background: var(--accent-soft);
+        color: var(--ink);
+        font-size: 0.8rem;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+        gap: 18px;
+        align-items: start;
+      }
+      .composer { position: sticky; top: 18px; }
+      .field {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+      input, textarea, select, button {
+        width: 100%;
+        border: 3px solid var(--line);
+        border-radius: 14px;
+        padding: 11px 12px;
+        font: inherit;
+        background: #201f31;
+        color: var(--ink);
+        box-shadow: 4px 4px 0 #211b52;
+      }
+      textarea { min-height: 110px; resize: vertical; }
+      button {
+        cursor: pointer;
+        background: var(--accent);
+        font-weight: 700;
+      }
+      button.secondary { background: var(--accent-soft); }
+      .button-row {
+        display: flex;
+        gap: 10px;
+      }
+      .board {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .column { min-height: 420px; }
+      .task-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        gap: 12px;
+      }
+      .task-card {
+        padding: 14px;
+        border: 3px solid var(--line);
+        border-radius: 18px;
+        background: #111119;
+        box-shadow: 4px 4px 0 #211b52;
+      }
+      .task-card strong {
+        display: block;
+        color: var(--ink);
+        margin-bottom: 6px;
+      }
+      .task-card .meta {
+        display: grid;
+        gap: 4px;
+        font-size: 0.82rem;
+      }
+      .task-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .notice {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: #201f31;
+        color: var(--ink);
+        border: 3px solid var(--line);
+        box-shadow: 4px 4px 0 #211b52;
+        margin-bottom: 12px;
+      }
+      .detail { margin-top: 18px; }
+      .detail pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--muted);
+      }
+      @media (max-width: 1180px) {
+        .hero, .layout, .board { grid-template-columns: 1fr; }
+        .composer { position: static; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="subnav">
+        <a href="/">Browser home</a>
+        <a href="/explorer">Explorer</a>
+        <a href="/scene-studio">Scene studio</a>
+        <a href="/compare">Compare backends</a>
+        <a href="/open-grafana">Grafana</a>
+      </div>
+
+      <section class="hero">
+        <section class="panel hero-copy">
+          <h1>Review tasks</h1>
+          <p>Turn saved cohorts and track findings into a real review queue with clear status, ownership, and export-ready outcomes.</p>
+          <div id="task_summary" class="chip-row"></div>
+        </section>
+        <aside class="panel hero-meta">
+          <h2 style="margin-top:0;">Workflow</h2>
+          <div class="chip-row">
+            <span class="chip">queued</span>
+            <span class="chip">assigned</span>
+            <span class="chip">in progress</span>
+            <span class="chip">submitted</span>
+            <span class="chip">QA</span>
+            <span class="chip">closed</span>
+          </div>
+        </aside>
+      </section>
+
+      <div class="layout">
+        <aside class="panel composer">
+          <div id="task_notice" class="notice" hidden></div>
+          <h2>Create task</h2>
+          <div class="field">
+            <label for="source_type">Source type</label>
+            <select id="source_type">
+              <option value="manual" selected>Manual</option>
+              <option value="cohort">Cohort</option>
+              <option value="track">Track</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="source_id">Source id</label>
+            <input id="source_id" type="text" placeholder="optional cohort_id or track_id">
+          </div>
+          <div class="field">
+            <label for="title">Title</label>
+            <input id="title" type="text" placeholder="night pedestrian review">
+          </div>
+          <div class="field">
+            <label for="description">Description</label>
+            <textarea id="description" placeholder="What needs to be inspected or exported?"></textarea>
+          </div>
+          <div class="field">
+            <label for="priority">Priority</label>
+            <select id="priority">
+              <option value="low">low</option>
+              <option value="normal" selected>normal</option>
+              <option value="high">high</option>
+              <option value="critical">critical</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="assignee">Assignee</label>
+            <input id="assignee" type="text" placeholder="optional reviewer name">
+          </div>
+          <div class="button-row">
+            <button id="create_task">Create</button>
+            <button id="refresh_tasks" class="secondary">Refresh</button>
+          </div>
+          <section class="panel detail" id="task_detail">
+            <h3>Selected task</h3>
+            <p>Select a task card to inspect its event history.</p>
+          </section>
+        </aside>
+
+        <section class="board">
+          <section class="panel column">
+            <h2>Queue</h2>
+            <ul id="queue_list" class="task-list"></ul>
+          </section>
+          <section class="panel column">
+            <h2>In progress</h2>
+            <ul id="progress_list" class="task-list"></ul>
+          </section>
+          <section class="panel column">
+            <h2>Review</h2>
+            <ul id="review_list" class="task-list"></ul>
+          </section>
+        </section>
+      </div>
+    </main>
+    <script>
+      const el = {
+        notice: document.getElementById("task_notice"),
+        summary: document.getElementById("task_summary"),
+        sourceType: document.getElementById("source_type"),
+        sourceId: document.getElementById("source_id"),
+        title: document.getElementById("title"),
+        description: document.getElementById("description"),
+        priority: document.getElementById("priority"),
+        assignee: document.getElementById("assignee"),
+        create: document.getElementById("create_task"),
+        refresh: document.getElementById("refresh_tasks"),
+        queue: document.getElementById("queue_list"),
+        progress: document.getElementById("progress_list"),
+        review: document.getElementById("review_list"),
+        detail: document.getElementById("task_detail"),
+      };
+
+      function showNotice(message) {
+        el.notice.hidden = !message;
+        el.notice.textContent = message || "";
+      }
+
+      const taskParams = new URLSearchParams(window.location.search);
+      const taskFilters = {
+        sourceType: taskParams.get("source_type") || "",
+        sourceId: taskParams.get("source_id") || "",
+      };
+
+      async function requestJson(url, options = {}) {
+        const response = await fetch(url, options);
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({ detail: "request failed" }));
+          throw new Error(payload.detail || "request failed");
+        }
+        return response.json();
+      }
+
+      function fmtTime(value) {
+        if (!value) return "n/a";
+        return new Date(value).toLocaleString();
+      }
+
+      function taskCard(task) {
+        return `
+          <li class="task-card" data-task="${task.task_id}">
+            <strong>${task.title}</strong>
+            <div class="meta">
+              <span>${task.source_type}${task.source_id ? ` · ${task.source_id}` : ""}</span>
+              <span>${task.priority} · ${task.status.replaceAll("_", " ")}</span>
+              <span>${task.assignee || "unassigned"}</span>
+              <span>${fmtTime(task.updated_at)}</span>
+            </div>
+            <div class="task-actions">
+              <button class="secondary" data-action="claim" data-task="${task.task_id}">Claim</button>
+              <button class="secondary" data-action="start" data-task="${task.task_id}">Start</button>
+              <button class="secondary" data-action="submit" data-task="${task.task_id}">Submit</button>
+              <button class="secondary" data-action="qa" data-task="${task.task_id}">QA pass</button>
+            </div>
+          </li>
+        `;
+      }
+
+      function renderColumns(items) {
+        const queueStates = new Set(["queued", "assigned"]);
+        const progressStates = new Set(["in_progress"]);
+        const reviewStates = new Set(["submitted", "qa_failed", "qa_passed", "closed"]);
+        const queue = items.filter((task) => queueStates.has(task.status));
+        const progress = items.filter((task) => progressStates.has(task.status));
+        const review = items.filter((task) => reviewStates.has(task.status));
+        el.queue.innerHTML = queue.length ? queue.map(taskCard).join("") : "<li><span>No queued tasks.</span></li>";
+        el.progress.innerHTML = progress.length ? progress.map(taskCard).join("") : "<li><span>No active tasks.</span></li>";
+        el.review.innerHTML = review.length ? review.map(taskCard).join("") : "<li><span>No submitted or QA tasks.</span></li>";
+
+        document.querySelectorAll("[data-task]").forEach((node) => {
+          node.addEventListener("click", async (event) => {
+            if (event.target?.dataset?.action) return;
+            await loadTask(node.dataset.task);
+          });
+        });
+
+        document.querySelectorAll("[data-action]").forEach((node) => {
+          node.addEventListener("click", async (event) => {
+            event.stopPropagation();
+            const taskId = node.dataset.task;
+            const action = node.dataset.action;
+            try {
+              if (action === "claim") {
+                await requestJson(`/api/tasks/${encodeURIComponent(taskId)}/claim`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ actor: "browser" }),
+                });
+              } else if (action === "start") {
+                await requestJson(`/api/tasks/${encodeURIComponent(taskId)}/start`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ actor: "browser" }),
+                });
+              } else if (action === "submit") {
+                await requestJson(`/api/tasks/${encodeURIComponent(taskId)}/submit`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ actor: "browser", note: "submitted from task board" }),
+                });
+              } else if (action === "qa") {
+                await requestJson(`/api/tasks/${encodeURIComponent(taskId)}/qa`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ actor: "browser", passed: true, note: "qa pass from task board" }),
+                });
+              }
+              await loadTasks();
+            } catch (error) {
+              showNotice(error.message);
+            }
+          });
+        });
+      }
+
+      function renderSummary(summary) {
+        const counts = summary.counts || {};
+        const chips = [
+          `total ${summary.total || 0}`,
+          `queued ${counts.queued || 0}`,
+          `in progress ${counts.in_progress || 0}`,
+          `submitted ${counts.submitted || 0}`,
+          `qa failed ${counts.qa_failed || 0}`,
+          `qa passed ${counts.qa_passed || 0}`,
+        ];
+        if (taskFilters.sourceType) {
+          chips.push(`filter ${taskFilters.sourceType}`);
+        }
+        if (taskFilters.sourceId) {
+          chips.push(`source ${taskFilters.sourceId}`);
+        }
+        el.summary.innerHTML = chips.map((value) => `<span class="chip">${value}</span>`).join("");
+      }
+
+      function taskSourceLink(task) {
+        if (task.source_type === "track" && task.source_id) {
+          return {
+            href: `/scene-studio?track_id=${encodeURIComponent(task.source_id)}`,
+            label: "Open track in scene studio",
+          };
+        }
+        if (task.source_type === "cohort" && task.source_id) {
+          return {
+            href: `/explorer?cohort_id=${encodeURIComponent(task.source_id)}`,
+            label: "Open cohort in explorer",
+          };
+        }
+        return null;
+      }
+
+      async function loadTask(taskId) {
+        const task = await requestJson(`/api/tasks/${encodeURIComponent(taskId)}`);
+        const sourceLink = taskSourceLink(task);
+        el.detail.innerHTML = `
+          <h3>${task.title}</h3>
+          <p>${task.description || "No description."}</p>
+          <div class="meta" style="margin-bottom:12px;">
+            <span>${task.source_type}${task.source_id ? ` · ${task.source_id}` : ""}</span>
+            <span>${task.priority} · ${task.status.replaceAll("_", " ")}</span>
+            <span>${task.assignee || "unassigned"}</span>
+          </div>
+          ${sourceLink ? `
+            <div class="button-row" style="margin-bottom:12px;">
+              <a href="${sourceLink.href}" style="display:inline-flex;align-items:center;justify-content:center;width:100%;border:3px solid var(--line);border-radius:14px;padding:11px 12px;font:inherit;background:var(--accent-soft);color:var(--ink);box-shadow:4px 4px 0 #211b52;text-decoration:none;font-weight:700;">
+                ${sourceLink.label}
+              </a>
+            </div>
+          ` : ""}
+          <pre>${JSON.stringify(task.events || [], null, 2)}</pre>
+        `;
+      }
+
+      async function loadTasks() {
+        const params = new URLSearchParams({ limit: "60" });
+        if (taskFilters.sourceType) params.set("source_type", taskFilters.sourceType);
+        if (taskFilters.sourceId) params.set("source_id", taskFilters.sourceId);
+        const payload = await requestJson(`/api/tasks?${params.toString()}`);
+        const summary = await requestJson("/api/tasks/summary");
+        renderSummary(summary);
+        renderColumns(payload.items || []);
+      }
+
+      async function createTask() {
+        const payload = await requestJson("/api/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source_type: el.sourceType.value,
+            source_id: el.sourceId.value.trim() || null,
+            title: el.title.value.trim(),
+            description: el.description.value.trim(),
+            priority: el.priority.value,
+            assignee: el.assignee.value.trim(),
+          }),
+        });
+        el.title.value = "";
+        el.description.value = "";
+        el.sourceId.value = "";
+        showNotice(`Created task ${payload.task_id}.`);
+        await loadTasks();
+      }
+
+      el.create.addEventListener("click", async () => {
+        try {
+          await createTask();
+        } catch (error) {
+          showNotice(error.message);
+        }
+      });
+      el.refresh.addEventListener("click", async () => {
+        try {
+          await loadTasks();
+        } catch (error) {
+          showNotice(error.message);
+        }
+      });
+
+      loadTasks().catch((error) => showNotice(error.message));
     </script>
   </body>
 </html>
@@ -2609,6 +3287,9 @@ def build_scene_studio_html() -> str:
         box-shadow: 8px 8px 0 #211b52;
         background: rgba(107, 89, 221, 0.14);
       }
+      .timeline-card.track-hit {
+        border-color: #8e82e8;
+      }
       .timeline-card img {
         width: 100%;
         aspect-ratio: 16 / 9;
@@ -2722,6 +3403,7 @@ def build_scene_studio_html() -> str:
         <a href="/">Browser home</a>
         <a href="/explorer">Explorer</a>
         <a href="/scene-studio">Scene studio</a>
+        <a href="/tasks">Review tasks</a>
         <a href="/open-grafana">Grafana</a>
       </div>
 
@@ -2769,8 +3451,15 @@ def build_scene_studio_html() -> str:
               <option value="contrast">Contrast</option>
             </select>
           </div>
+          <div class="field">
+            <label for="track_id">Track review</label>
+            <input id="track_id" type="text" placeholder="optional track_id">
+          </div>
           <div class="button-row" style="margin-bottom:12px;">
             <button id="load_scene">Load scene</button>
+            <button id="load_track" class="secondary">Load track</button>
+          </div>
+          <div class="button-row" style="margin-bottom:12px;">
             <button id="open_search" class="secondary">Back to search</button>
           </div>
           <p>
@@ -2816,7 +3505,7 @@ def build_scene_studio_html() -> str:
             <aside class="panel inspector">
               <h2 style="margin-top:0;">Sample inspector</h2>
               <div id="sample_inspector" class="inspector-grid">
-                <p>Select a scene sample to inspect its metadata and annotations.</p>
+                <p>Select a scene sample or load a track to inspect temporal context and annotations.</p>
               </div>
             </aside>
           </div>
@@ -2839,11 +3528,13 @@ def build_scene_studio_html() -> str:
 
       const state = {
         sceneToken: params.get("scene_token") || "",
+        trackId: params.get("track_id") || "",
         sampleIdx: params.get("sample_idx") ? Number(params.get("sample_idx")) : null,
         maxPoints: Number(params.get("max_points") || 32000),
         processedMode: params.get("processed_mode") || "edges",
         currentScene: null,
         currentSample: null,
+        currentTrack: null,
       };
 
       const el = {
@@ -2851,7 +3542,9 @@ def build_scene_studio_html() -> str:
         sceneSelect: document.getElementById("scene_select"),
         maxPoints: document.getElementById("max_points"),
         processedMode: document.getElementById("processed_mode"),
+        trackId: document.getElementById("track_id"),
         loadScene: document.getElementById("load_scene"),
+        loadTrack: document.getElementById("load_track"),
         openSearch: document.getElementById("open_search"),
         sceneChips: document.getElementById("scene_chips"),
         viewerTitle: document.getElementById("viewer_title"),
@@ -2864,6 +3557,12 @@ def build_scene_studio_html() -> str:
       };
 
       const viewer = createViewer(el.canvas);
+      const cache = {
+        scenes: new Map(),
+        samples: new Map(),
+        tracks: new Map(),
+        lidar: new Map(),
+      };
 
       function showNotice(message) {
         el.notice.hidden = !message;
@@ -2873,6 +3572,7 @@ def build_scene_studio_html() -> str:
       function syncQuery() {
         const next = new URLSearchParams();
         if (state.sceneToken) next.set("scene_token", state.sceneToken);
+        if (state.trackId) next.set("track_id", state.trackId);
         if (state.sampleIdx !== null && state.sampleIdx !== undefined) next.set("sample_idx", String(state.sampleIdx));
         next.set("max_points", String(state.maxPoints));
         next.set("processed_mode", state.processedMode);
@@ -2906,6 +3606,7 @@ def build_scene_studio_html() -> str:
           state.sceneToken = scenes[0].scene_token;
         }
         el.sceneSelect.value = state.sceneToken;
+        el.trackId.value = state.trackId;
       }
 
       function renderSceneHeader(scene) {
@@ -2919,12 +3620,13 @@ def build_scene_studio_html() -> str:
 
       function renderTimeline(scene, activeSampleIdx) {
         const samples = scene.samples || [];
+        const trackSampleIds = new Set((state.currentTrack?.sample_ids || []).map((value) => Number(value)));
         if (!samples.length) {
           el.timeline.innerHTML = "<p>No scene samples available.</p>";
           return;
         }
         el.timeline.innerHTML = samples.map((sample) => `
-          <article class="timeline-card ${sample.sample_idx === activeSampleIdx ? "active" : ""}" data-sample="${sample.sample_idx}">
+          <article class="timeline-card ${sample.sample_idx === activeSampleIdx ? "active" : ""} ${trackSampleIds.has(Number(sample.sample_idx)) ? "track-hit" : ""}" data-sample="${sample.sample_idx}">
             ${sample.preview_url ? `<img loading="lazy" src="${sample.preview_url}" alt="Sample ${sample.sample_idx}">` : `<div style="aspect-ratio:16/9;background:#1f2030;"></div>`}
             <div class="body">
               <strong>#${sample.sample_idx}</strong>
@@ -2935,6 +3637,23 @@ def build_scene_studio_html() -> str:
         el.timeline.querySelectorAll("[data-sample]").forEach((node) => {
           node.addEventListener("click", () => loadSample(Number(node.dataset.sample)));
         });
+      }
+
+      function renderTrackSummary(track) {
+        if (!track) return "";
+        const observationPreview = (track.observations || []).slice(0, 6).map((obs) => `
+          <li><strong style="color:var(--ink);">#${obs.sample_idx}</strong><br>${obs.category} · LiDAR ${formatNumber(obs.num_lidar_pts)} · Radar ${formatNumber(obs.num_radar_pts)}</li>
+        `).join("");
+        return `
+          <h3 style="margin:12px 0 0;">Track review</h3>
+          <div class="metric-row"><span>Track</span><strong><code>${track.track_id.slice(0, 16)}</code></strong></div>
+          <div class="metric-row"><span>Category</span><strong>${track.category}</strong></div>
+          <div class="metric-row"><span>Samples</span><strong>${formatNumber(track.sample_count)}</strong></div>
+          <div class="metric-row"><span>Scene</span><strong>${track.scene_name}</strong></div>
+          <ul class="annotation-list">
+            ${observationPreview || "<li>No observations available.</li>"}
+          </ul>
+        `;
       }
 
       function renderInspector(sample, lidarPayload) {
@@ -2948,6 +3667,7 @@ def build_scene_studio_html() -> str:
           <div class="metric-row"><span>Annotations</span><strong>${formatNumber(sample.num_annotations)}</strong></div>
           <div class="metric-row"><span>Location</span><strong>${sample.location}</strong></div>
           <div class="metric-row"><span>Token</span><strong><code>${sample.token.slice(0, 16)}</code></strong></div>
+          ${renderTrackSummary(state.currentTrack)}
           <h3 style="margin:12px 0 0;">Top annotations</h3>
           <ul class="annotation-list">
             ${annotations.map((annotation) => `<li><strong style="color:var(--ink);">${annotation.category}</strong><br>LiDAR ${formatNumber(annotation.num_lidar_pts)} · Radar ${formatNumber(annotation.num_radar_pts)}</li>`).join("") || "<li>No annotations available.</li>"}
@@ -2980,7 +3700,12 @@ def build_scene_studio_html() -> str:
       async function loadScene(sceneToken, preferredSampleIdx = null) {
         state.sceneToken = sceneToken;
         syncQuery();
-        const scene = await requestJson(`/api/scenes/${encodeURIComponent(sceneToken)}`);
+        const cacheKey = `scene:${sceneToken}`;
+        let scene = cache.scenes.get(cacheKey);
+        if (!scene) {
+          scene = await requestJson(`/api/scenes/${encodeURIComponent(sceneToken)}`);
+          cache.scenes.set(cacheKey, scene);
+        }
         state.currentScene = scene;
         renderSceneHeader(scene);
 
@@ -2994,8 +3719,18 @@ def build_scene_studio_html() -> str:
       async function loadSample(sampleIdx, options = {}) {
         state.sampleIdx = sampleIdx;
         syncQuery();
-        const sample = await requestJson(`/api/samples/${sampleIdx}`);
-        const lidar = await requestJson(`/api/samples/${sampleIdx}/lidar/points?max_points=${encodeURIComponent(state.maxPoints)}`);
+        const sampleCacheKey = `sample:${sampleIdx}`;
+        let sample = cache.samples.get(sampleCacheKey);
+        if (!sample) {
+          sample = await requestJson(`/api/samples/${sampleIdx}`);
+          cache.samples.set(sampleCacheKey, sample);
+        }
+        const lidarCacheKey = `lidar:${sampleIdx}:${state.maxPoints}`;
+        let lidar = cache.lidar.get(lidarCacheKey);
+        if (!lidar) {
+          lidar = await requestJson(`/api/samples/${sampleIdx}/lidar/points?max_points=${encodeURIComponent(state.maxPoints)}`);
+          cache.lidar.set(lidarCacheKey, lidar);
+        }
         state.currentSample = sample;
 
         el.viewerStatus.textContent = `${formatNumber(lidar.rendered_count)} of ${formatNumber(lidar.count)} points rendered · sample #${sample.sample_idx}`;
@@ -3017,6 +3752,27 @@ def build_scene_studio_html() -> str:
         if (state.currentScene) {
           renderTimeline(state.currentScene, sampleIdx);
         }
+      }
+
+      async function loadTrack(trackId) {
+        state.trackId = trackId;
+        syncQuery();
+        const cacheKey = `track:${trackId}`;
+        let track = cache.tracks.get(cacheKey);
+        if (!track) {
+          track = await requestJson(`/api/tracks/${encodeURIComponent(trackId)}`);
+          cache.tracks.set(cacheKey, track);
+        }
+        state.currentTrack = track;
+        el.trackId.value = track.track_id;
+        state.sceneToken = track.scene_token;
+        renderSceneHeader({
+          scene_name: track.scene_name,
+          location: track.location,
+          num_samples: track.sample_count,
+          scene_token: track.scene_token,
+        });
+        await loadScene(track.scene_token, track.preview_sample_idx || track.sample_ids?.[0] || null);
       }
 
       function createViewer(canvas) {
@@ -3132,9 +3888,14 @@ def build_scene_studio_html() -> str:
           showNotice("");
           el.maxPoints.value = String(state.maxPoints);
           el.processedMode.value = state.processedMode;
+          el.trackId.value = state.trackId;
 
           const filters = await requestJson("/api/filters");
           populateScenes(filters);
+          if (state.trackId) {
+            await loadTrack(state.trackId);
+            return;
+          }
           if (!state.sceneToken && filters.scenes?.length) {
             state.sceneToken = filters.scenes[0].scene_token;
           }
@@ -3170,14 +3931,27 @@ def build_scene_studio_html() -> str:
       el.loadScene.addEventListener("click", async () => {
         if (el.sceneSelect.value) {
           state.sceneToken = el.sceneSelect.value;
+          state.trackId = "";
+          state.currentTrack = null;
           state.sampleIdx = null;
           await bootstrap();
+        }
+      });
+
+      el.loadTrack.addEventListener("click", async () => {
+        if (!el.trackId.value.trim()) return;
+        state.trackId = el.trackId.value.trim();
+        try {
+          await loadTrack(state.trackId);
+        } catch (error) {
+          showNotice(error.message);
         }
       });
 
       el.openSearch.addEventListener("click", () => {
         const next = new URLSearchParams();
         if (state.sceneToken) next.set("scene_token", state.sceneToken);
+        if (state.trackId) next.set("q", state.trackId);
         window.location.href = next.toString() ? `/explorer?${next}` : "/explorer";
       });
 
@@ -3530,7 +4304,15 @@ def create_app(
     store = ExplorerStore(config)
     report_store = BenchmarkReportStore(config.runtime.reports_root)
     es_store = ElasticsearchBackend(url=config.services.elasticsearch.url)
+    track_es_store = TrackElasticsearchBackend(url=config.services.elasticsearch.url)
     mining_store = MiningSessionStore(config.services.postgres)
+    track_store = TrackStore(config.services.postgres)
+    task_store = ReviewTaskStore(config.services.postgres)
+    export_service = CohortExportService(
+        config,
+        session_store=mining_store,
+        task_store=task_store,
+    )
     mining_service = MiningSearchService(config, es_backend=es_store)
     default_limit = max(1, min(result_limit, 100))
     app = FastAPI(title="nuDemo Browser", docs_url="/docs", redoc_url=None)
@@ -3551,6 +4333,10 @@ def create_app(
     @app.get("/scene-studio", response_class=HTMLResponse)
     def scene_studio_page() -> str:
         return build_scene_studio_html()
+
+    @app.get("/tasks", response_class=HTMLResponse)
+    def tasks_page() -> str:
+        return build_tasks_html()
 
     @app.get("/compare", response_class=HTMLResponse)
     def compare_page() -> str:
@@ -3578,7 +4364,9 @@ def create_app(
     @app.get("/api/summary")
     def api_summary() -> dict[str, Any]:
         try:
-            return store.fetch_summary()
+            payload = store.fetch_summary()
+            payload["workflow"] = fetch_workflow_metrics(config.services.postgres)
+            return payload
         except Exception as exc:  # pragma: no cover - depends on external services
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -3636,6 +4424,72 @@ def create_app(
             )
         except Exception as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/tracks/search")
+    def api_track_search(
+        q: str = "",
+        scene_token: str = "",
+        location: str = "",
+        category: str = "",
+        limit: int = Query(default=12, ge=1, le=48),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
+        started = time.perf_counter()
+        try:
+            if track_es_store.is_available():
+                result = track_es_store.search(
+                    q=q,
+                    scene_token=scene_token,
+                    location=location,
+                    category=category,
+                    size=limit,
+                    from_=offset,
+                )
+                score_map = {
+                    str(hit["track_id"]): float(hit.get("score") or 0.0)
+                    for hit in result.get("hits", [])
+                }
+                items = track_store.hydrate_tracks(
+                    [str(hit["track_id"]) for hit in result.get("hits", [])]
+                )
+                payload = {
+                    "total": int(result.get("total") or 0),
+                    "limit": limit,
+                    "offset": offset,
+                    "items": [{**item, "score": score_map.get(str(item["track_id"]), 0.0)} for item in items],
+                }
+            else:
+                payload = track_store.search_tracks(
+                    q=q,
+                    scene_token=scene_token,
+                    location=location,
+                    category=category,
+                    limit=limit,
+                    offset=offset,
+                )
+                payload["limit"] = limit
+                payload["offset"] = offset
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        finally:
+            record_workflow_latency("track_search", (time.perf_counter() - started) * 1000.0)
+        return payload
+
+    @app.get("/api/tracks/{track_id}")
+    def api_track_detail(
+        track_id: str,
+        observation_limit: int = Query(default=180, ge=1, le=480),
+    ) -> dict[str, Any]:
+        started = time.perf_counter()
+        try:
+            payload = track_store.get_track(track_id, observation_limit=observation_limit)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"track {track_id} was not found") from exc
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        finally:
+            record_workflow_latency("track_detail", (time.perf_counter() - started) * 1000.0)
+        return payload
 
     @app.get("/api/mining/overview")
     def api_mining_overview(
@@ -3738,6 +4592,186 @@ def create_app(
             )
         except Exception as exc:  # pragma: no cover - depends on external services
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/cohorts/{cohort_id}/exports")
+    def api_cohort_exports(
+        cohort_id: str,
+        limit: int = Query(default=12, ge=1, le=50),
+    ) -> dict[str, Any]:
+        try:
+            items = export_service.list_exports(cohort_id=cohort_id, limit=limit)
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {"items": items}
+
+    @app.post("/api/cohorts/{cohort_id}/export")
+    def api_export_cohort(cohort_id: str, payload: dict[str, Any] | None = JSON_BODY) -> dict[str, Any]:
+        payload = payload or {}
+        started = time.perf_counter()
+        try:
+            export = export_service.export_cohort(
+                cohort_id,
+                task_id=str(payload.get("task_id") or "").strip() or None,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"cohort {cohort_id} was not found") from exc
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        finally:
+            record_workflow_latency("cohort_export", (time.perf_counter() - started) * 1000.0)
+        record_workflow_event("cohort_export")
+        return export
+
+    @app.get("/api/tasks/summary")
+    def api_task_summary() -> dict[str, Any]:
+        try:
+            return task_store.task_summary()
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.get("/api/tasks")
+    def api_tasks(
+        status: str | None = None,
+        source_type: str | None = None,
+        source_id: str | None = None,
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> dict[str, Any]:
+        try:
+            items = [
+                _task_response(item)
+                for item in task_store.list_tasks(
+                    status=status,
+                    source_type=source_type,
+                    source_id=source_id,
+                    limit=limit,
+                )
+            ]
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {"items": items}
+
+    @app.post("/api/tasks")
+    def api_create_task(payload: dict[str, Any] | None = JSON_BODY) -> dict[str, Any]:
+        payload = payload or {}
+        started = time.perf_counter()
+        try:
+            task = task_store.create_task(
+                source_type=str(payload.get("source_type") or "manual"),
+                source_id=str(payload.get("source_id") or "").strip() or None,
+                title=str(payload.get("title") or "").strip(),
+                description=str(payload.get("description") or "").strip(),
+                priority=str(payload.get("priority") or "normal"),
+                assignee=str(payload.get("assignee") or "").strip(),
+                metadata=dict(payload.get("metadata") or {}),
+            )
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        finally:
+            record_workflow_latency("task_create", (time.perf_counter() - started) * 1000.0)
+        record_workflow_event("task_create")
+        return _task_response(task)
+
+    @app.get("/api/tasks/{task_id}")
+    def api_task(task_id: str) -> dict[str, Any]:
+        try:
+            return _task_response(task_store.get_task(task_id))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"task {task_id} was not found") from exc
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @app.post("/api/tasks/{task_id}/claim")
+    def api_task_claim(task_id: str, payload: dict[str, Any] | None = JSON_BODY) -> dict[str, Any]:
+        payload = payload or {}
+        started = time.perf_counter()
+        try:
+            task = task_store.claim_task(
+                task_id,
+                actor=str(payload.get("actor") or "browser"),
+                assignee=str(payload.get("assignee") or "").strip() or None,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"task {task_id} was not found") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        finally:
+            record_workflow_latency("task_claim", (time.perf_counter() - started) * 1000.0)
+        record_workflow_event("task_claim")
+        return _task_response(task)
+
+    @app.post("/api/tasks/{task_id}/start")
+    def api_task_start(task_id: str, payload: dict[str, Any] | None = JSON_BODY) -> dict[str, Any]:
+        payload = payload or {}
+        started = time.perf_counter()
+        try:
+            task = task_store.start_task(task_id, actor=str(payload.get("actor") or "browser"))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"task {task_id} was not found") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        finally:
+            record_workflow_latency("task_start", (time.perf_counter() - started) * 1000.0)
+        record_workflow_event("task_start")
+        return _task_response(task)
+
+    @app.post("/api/tasks/{task_id}/submit")
+    def api_task_submit(task_id: str, payload: dict[str, Any] | None = JSON_BODY) -> dict[str, Any]:
+        payload = payload or {}
+        started = time.perf_counter()
+        try:
+            task = task_store.submit_task(
+                task_id,
+                actor=str(payload.get("actor") or "browser"),
+                note=str(payload.get("note") or ""),
+                metadata=dict(payload.get("metadata") or {}),
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"task {task_id} was not found") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        finally:
+            record_workflow_latency("task_submit", (time.perf_counter() - started) * 1000.0)
+        record_workflow_event("task_submit")
+        return _task_response(task)
+
+    @app.post("/api/tasks/{task_id}/qa")
+    def api_task_qa(task_id: str, payload: dict[str, Any] | None = JSON_BODY) -> dict[str, Any]:
+        payload = payload or {}
+        started = time.perf_counter()
+        try:
+            task = task_store.qa_task(
+                task_id,
+                actor=str(payload.get("actor") or "browser"),
+                passed=bool(payload.get("passed", False)),
+                note=str(payload.get("note") or ""),
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"task {task_id} was not found") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        finally:
+            record_workflow_latency("task_qa", (time.perf_counter() - started) * 1000.0)
+        record_workflow_event("task_qa", outcome="passed" if bool(payload.get("passed", False)) else "failed")
+        return _task_response(task)
+
+    @app.post("/api/tasks/{task_id}/close")
+    def api_task_close(task_id: str, payload: dict[str, Any] | None = JSON_BODY) -> dict[str, Any]:
+        payload = payload or {}
+        started = time.perf_counter()
+        try:
+            task = task_store.close_task(
+                task_id,
+                actor=str(payload.get("actor") or "browser"),
+                note=str(payload.get("note") or ""),
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"task {task_id} was not found") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        finally:
+            record_workflow_latency("task_close", (time.perf_counter() - started) * 1000.0)
+        record_workflow_event("task_close")
+        return _task_response(task)
 
     @app.post("/api/mining/search")
     def api_mining_search(payload: dict[str, Any] | None = JSON_BODY) -> dict[str, Any]:

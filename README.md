@@ -31,6 +31,13 @@ make infra-up
 # Load the searchable multimodal index from the already-ingested MinIO+PostgreSQL corpus
 make multimodal-index BATCH_SIZE=24
 
+# Materialize tracks from the loaded nuScenes corpus and build the track search index
+make track-index BATCH_SIZE=250
+
+# Search tracks or export a saved cohort manifest
+make track-search EXTRA_ARGS='--q pedestrian'
+make export-cohort EXTRA_ARGS='cohort_id_here'
+
 # Download nuScenes v1.0-trainval (~42 GB keyframes)
 make download-trainval
 
@@ -52,9 +59,10 @@ make data-explorer    # http://127.0.0.1:8788
 | `/compare` | Backend comparison — charts and ranked table |
 | `/explorer` | Unified lexical + multimodal sample search, mining sessions, saved cohorts |
 | `/scene-studio` | 3D LiDAR scrubber per scene |
+| `/tasks` | Review task board for cohorts and tracks |
 | `/open-grafana` | Grafana dashboards redirect |
 
-Requires the `minio-postgres` backend to be loaded. Multimodal search requires `make multimodal-index` after ingest. Grafana at `http://127.0.0.1:3000/grafana/`.
+Requires the `minio-postgres` backend to be loaded. Multimodal search requires `make multimodal-index` after ingest. Track review requires `make track-index` after the sample corpus is loaded. Grafana at `http://127.0.0.1:3000/grafana/`.
 
 ## Architecture
 
@@ -63,9 +71,13 @@ nuScenes → Extraction → Storage backends (swappable) → Benchmarks / Explor
                   ↓                         ↓
            Kafka refined topic        MinIO + PostgreSQL
                   ↓                         ↓
-                Redis cache       Multimodal index → Elasticsearch
+                Redis cache       Multimodal sample index → Elasticsearch
                                              ↓
-                               Explorer search / mining / cohorts
+                        Explorer search / mining / cohorts / task creation
+                                             ↓
+            Raw nuScenes metadata → Track materializer → Postgres tracks + track index
+                                             ↓
+                        Scene Studio track review / Tasks board / Cohort export
 ```
 
 Hot write path: Extraction → direct write to backend (35–37 s/s for Lance/Parquet/WebDataset).
@@ -77,17 +89,24 @@ Multimodal search path:
 - `/explorer` keeps one search bar. The backend transparently upgrades text search into hybrid retrieval and lets you steer with positive and negative examples.
 - Mining sessions and saved cohorts live in PostgreSQL.
 
+Track-aware review path:
+- `make track-index` walks the raw nuScenes metadata for the currently loaded corpus, materializes `tracks` and `track_observations` into PostgreSQL, and indexes track summaries into Elasticsearch.
+- `/explorer` can surface track hits alongside sample hits from the same query.
+- `/scene-studio?track_id=...` opens temporal review around a specific track.
+- `/tasks` manages `queued → assigned → in_progress → submitted → qa_failed|qa_passed → closed`.
+- `make export-cohort EXTRA_ARGS='<cohort_id>'` writes a Parquet manifest and records it in `cohort_exports`.
+
 ## Stack
 
 | Service | Purpose |
 |---|---|
 | MinIO | Object storage for camera JPEGs, LiDAR/radar arrays |
-| PostgreSQL | Sample metadata, annotations, telemetry history |
+| PostgreSQL | Sample metadata, annotations, tracks, review tasks, exports, telemetry history |
 | Redis | Metadata index, embedding cache |
 | Kafka | Async metadata bus (refined topic → Redis warmup) |
-| Elasticsearch | Lexical + multimodal retrieval index for Explorer mining |
+| Elasticsearch | Lexical + multimodal sample retrieval plus track retrieval |
 | Prometheus | Scrapes `:9464` — run metrics, span metrics, service pressure |
-| Grafana | Backend comparison, query latency monitor, stage summary |
+| Grafana | Backend comparison, query latency monitor, stage summary, workflow/task metrics |
 
 ## Development
 

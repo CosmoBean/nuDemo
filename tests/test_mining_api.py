@@ -232,3 +232,59 @@ def test_mining_session_and_cohort_routes(monkeypatch, tmp_path: Path) -> None:
     )
     assert saved.status_code == 200
     assert saved.json()["name"] == "night pedestrian cohort"
+
+
+def test_task_routes_forward_source_filters(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("nudemo.explorer.app.ensure_metrics_exporter", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("nudemo.explorer.app.install_http_metrics", lambda *_args, **_kwargs: None)
+
+    seen: dict[str, object] = {}
+
+    def fake_list_tasks(_self, *, status=None, source_type=None, source_id=None, limit=50):
+        seen.update(
+            {
+                "status": status,
+                "source_type": source_type,
+                "source_id": source_id,
+                "limit": limit,
+            }
+        )
+        return [
+            {
+                "task_id": "task-1",
+                "source_type": source_type or "track",
+                "source_id": source_id or "track-1",
+                "title": "review track-1",
+                "description": "",
+                "status": "queued",
+                "priority": "normal",
+                "assignee": "",
+                "metadata": {},
+                "created_at": None,
+                "updated_at": None,
+                "event_count": 0,
+            }
+        ]
+
+    monkeypatch.setattr("nudemo.explorer.app.ReviewTaskStore.list_tasks", fake_list_tasks)
+    monkeypatch.setattr(
+        "nudemo.explorer.app.ReviewTaskStore.task_summary",
+        lambda _self: {"counts": {"queued": 1}, "avg_cycle_time_sec": 0.0, "total": 1},
+    )
+
+    client = TestClient(create_app(config=_build_config(tmp_path)))
+    response = client.get(
+        "/api/tasks",
+        params={"source_type": "track", "source_id": "track-1", "limit": 20},
+    )
+
+    assert response.status_code == 200
+    assert seen == {
+        "status": None,
+        "source_type": "track",
+        "source_id": "track-1",
+        "limit": 20,
+    }
+    payload = response.json()
+    assert payload["items"][0]["source_type"] == "track"
+    assert payload["items"][0]["source_id"] == "track-1"

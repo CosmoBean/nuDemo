@@ -69,8 +69,8 @@ endif
 	kafka kafka-topics kafka-metadata kafka-full storage storage-minio-postgres storage-redis \
 	storage-lance storage-parquet storage-webdataset benchmark-sim benchmark-real dashboard render-sample \
 	render-scene download-trainval download-trainval-full telemetry-runs multimodal-index \
-	telemetry-dashboard reports-index serve-reports data-explorer lint test clean infra-up \
-	infra-down infra-ps infra-logs overnight-study
+	telemetry-dashboard reports-index serve-reports data-explorer track-index track-search \
+	export-cohort tasks lint test clean infra-up infra-down infra-ps infra-logs overnight-study
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
@@ -156,6 +156,18 @@ telemetry-runs: ## Show recent telemetry runs stored in PostgreSQL
 
 multimodal-index: ## Build the multimodal Elasticsearch index from loaded samples
 	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) multimodal-index $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) --batch-size $(or $(BATCH_SIZE),24) $(EXTRA_ARGS)
+
+track-index: ## Materialize track tables and index them into Elasticsearch
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) track-index $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) --batch-size $(or $(BATCH_SIZE),250) $(EXTRA_ARGS)
+
+track-search: ## Search materialized tracks; use EXTRA_ARGS for --q / --category / --source
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) track-search --limit $(or $(LIMIT),20) $(EXTRA_ARGS)
+
+export-cohort: ## Export a saved cohort as Parquet; set COHORT_ID and optional TASK_ID via EXTRA_ARGS
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) export-cohort $(EXTRA_ARGS)
+
+tasks: ## Operate on review tasks; pass EXTRA_ARGS like "list" or "create --title ..."
+	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) tasks $(EXTRA_ARGS)
 
 telemetry-dashboard: ## Render telemetry dashboard from PostgreSQL; optional RUN_ID=<id>
 	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) telemetry dashboard $(if $(RUN_ID),--run-id $(RUN_ID),--latest)
