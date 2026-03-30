@@ -57,7 +57,7 @@ make data-explorer    # http://127.0.0.1:8788
 |---|---|
 | `/` | Home — links to all views |
 | `/compare` | Backend comparison — charts and ranked table |
-| `/explorer` | Unified lexical + multimodal sample search, mining sessions, saved cohorts |
+| `/explorer` | Unified scene and sample search with saved cohorts |
 | `/scene-studio` | 3D LiDAR scrubber per scene |
 | `/tasks` | Review task board for cohorts and tracks |
 | `/open-grafana` | Grafana dashboards redirect |
@@ -67,17 +67,13 @@ Requires the `minio-postgres` backend to be loaded. Multimodal search requires `
 ## Architecture
 
 ```
-nuScenes → Extraction → Storage backends (swappable) → Benchmarks / Explorer
-                  ↓                         ↓
-           Kafka refined topic        MinIO + PostgreSQL
-                  ↓                         ↓
-                Redis cache       Multimodal sample index → Elasticsearch
-                                             ↓
-                        Explorer search / mining / cohorts / task creation
-                                             ↓
-            Raw nuScenes metadata → Track materializer → Postgres tracks + track index
-                                             ↓
-                        Scene Studio track review / Tasks board / Cohort export
+nuScenes → Clean data pipeline → Storage backends (swappable) → OmniTag-inspired ML processing
+                  ↓                         ↓                                  ↓
+           Kafka refined topic        MinIO + PostgreSQL         OpenCLIP + BEV + fused vectors
+                  ↓                         ↓                                  ↓
+                Redis cache       Raw metadata + tracks              Elasticsearch scene-search index
+                                                                            ↓
+                            Explorer scene/sample search / Scene Studio / Tasks / Cohort export
 ```
 
 Hot write path: Extraction → direct write to backend (35–37 s/s for Lance/Parquet/WebDataset).
@@ -86,8 +82,9 @@ Kafka full-payload consume measured at ~3.4 msg/s — not in the write path.
 Multimodal search path:
 - `make storage-minio-postgres ...` loads the full-fidelity browser corpus.
 - `make multimodal-index` builds one Elasticsearch document per sample with lexical fields plus image, LiDAR, radar, metadata, and fused vectors.
-- `/explorer` keeps one search bar. The backend transparently upgrades text search into hybrid retrieval and lets you steer with positive and negative examples.
-- Mining sessions and saved cohorts live in PostgreSQL.
+- `/explorer` keeps one search bar and uses the cleaned scene/sample corpus underneath it for scene names, tokens, locations, and annotation categories.
+
+The scene-search stack is intentionally OmniTag-inspired rather than a literal clone: the data pipeline first normalizes raw nuScenes sensor payloads and metadata into a clean browser corpus, then the ML pipeline derives camera, LiDAR BEV, radar BEV, metadata-text, and fused embeddings so Elasticsearch can rank scene-relevant multimodal hits instead of only lexical matches.
 
 Track-aware review path:
 - `make track-index` walks the raw nuScenes metadata for the currently loaded corpus, materializes `tracks` and `track_observations` into PostgreSQL, and indexes track summaries into Elasticsearch.
