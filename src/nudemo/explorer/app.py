@@ -885,8 +885,8 @@ def build_browser_home_html() -> str:
         <div class="hero-inner">
           <div>
             <div class="pill">Ingested data browser</div>
-            <h1>nuScenes storage backend benchmark.</h1>
-            <p>Compare five backends across ingest speed, scan throughput, latency, and disk use.</p>
+            <h1>nuScenes data engine and scene search.</h1>
+            <p>Benchmark storage backends, build a clean multimodal corpus, and search scenes through a single retrieval surface.</p>
             <div class="hero-actions">
               <a class="github-link" href="https://github.com/CosmoBean/nuDemo" target="_blank" rel="noreferrer">
                 <svg class="github-icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -977,8 +977,8 @@ def build_browser_home_html() -> str:
             <div class="pipe-node">
               <div class="pipe-step">02</div>
               <div class="pipe-body">
-                <div class="pipe-name">Clean Data Pipeline</div>
-                <div class="pipe-sub">Per sample &nbsp;&middot;&nbsp; normalized into a search-ready corpus</div>
+                <div class="pipe-name">Clean corpus</div>
+                <div class="pipe-sub">Per-sample normalization into the reproducible source of truth</div>
                 <div class="op-chips">
                   <span class="op-chip">sensor cleanup</span>
                   <span class="op-chip">JPEG encode</span>
@@ -986,7 +986,12 @@ def build_browser_home_html() -> str:
                   <span class="op-chip">annotation parse</span>
                   <span class="op-chip">scene grouping</span>
                   <span class="op-chip">track materialize</span>
+                  <span class="op-chip">object storage paths</span>
                   <span class="op-chip">token index</span>
+                </div>
+                <div class="backend-grid" style="margin-top:14px;">
+                  <span class="backend-pill">MinIO object payloads</span>
+                  <span class="backend-pill">PostgreSQL samples + scenes + annotations + tracks</span>
                 </div>
               </div>
             </div>
@@ -996,29 +1001,21 @@ def build_browser_home_html() -> str:
             <div class="pipe-node">
               <div class="pipe-step">03</div>
               <div class="pipe-body">
-                <div class="pipe-name">Storage and ML Processing <span class="swap-badge">swappable</span></div>
-                <div class="pipe-sub">OmniTag-inspired scene search over cleaned multimodal samples</div>
+                <div class="pipe-name">Benchmarkable storage shapes <span class="swap-badge">swappable</span></div>
+                <div class="pipe-sub">Same cleaned corpus written into comparable backend layouts</div>
                 <div class="backend-grid">
                   <span class="backend-pill">MinIO + PostgreSQL</span>
+                  <span class="backend-pill">Redis cache</span>
                   <span class="backend-pill">Lance</span>
                   <span class="backend-pill">Parquet</span>
                   <span class="backend-pill">WebDataset</span>
                 </div>
                 <div class="op-chips" style="margin-top:14px;">
-                  <span class="op-chip">OpenCLIP encode</span>
-                  <span class="op-chip">camera batch</span>
-                  <span class="op-chip">LiDAR BEV</span>
-                  <span class="op-chip">radar BEV</span>
-                  <span class="op-chip">metadata text</span>
-                  <span class="op-chip">fused vectors</span>
-                  <span class="op-chip">scene-search index</span>
-                </div>
-                <div class="cache-row">
-                  <div class="cache-node">
-                    <span class="cache-label">Cache</span>
-                    <span class="cache-name">Redis</span>
-                    <span class="cache-perf">async via Kafka for metadata and embeddings</span>
-                  </div>
+                  <span class="op-chip">ingest throughput</span>
+                  <span class="op-chip">sequential scan</span>
+                  <span class="op-chip">random access p50/p95</span>
+                  <span class="op-chip">curation latency</span>
+                  <span class="op-chip">disk footprint</span>
                 </div>
               </div>
             </div>
@@ -1028,12 +1025,38 @@ def build_browser_home_html() -> str:
             <div class="pipe-node">
               <div class="pipe-step">04</div>
               <div class="pipe-body">
-                <div class="pipe-name">Search and review</div>
-                <div class="pipe-sub">Scene-aware retrieval, temporal review, and human-in-the-loop follow-up</div>
+                <div class="pipe-name">Multimodal indexing</div>
+                <div class="pipe-sub">OmniTag-inspired scene-search features built from the cleaned corpus</div>
                 <div class="op-chips">
-                  <span class="op-chip">sample search</span>
+                  <span class="op-chip">OpenCLIP ViT-B-32</span>
+                  <span class="op-chip">laion2b_s34b_b79k</span>
+                  <span class="op-chip">6-camera average</span>
+                  <span class="op-chip">LiDAR BEV 224x224</span>
+                  <span class="op-chip">radar BEV 224x224</span>
+                  <span class="op-chip">metadata text</span>
+                  <span class="op-chip">512-d vectors</span>
+                  <span class="op-chip">fused embedding</span>
+                </div>
+                <div class="backend-grid" style="margin-top:14px;">
+                  <span class="backend-pill">Elasticsearch sample index</span>
+                  <span class="backend-pill">Elasticsearch track index</span>
+                  <span class="backend-pill">cosine script_score retrieval</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="pipe-arrow"></div>
+
+            <div class="pipe-node">
+              <div class="pipe-step">05</div>
+              <div class="pipe-body">
+                <div class="pipe-name">Search and review</div>
+                <div class="pipe-sub">One search bar over lexical lookup, multimodal retrieval, tracks, cohorts, and review workflows</div>
+                <div class="op-chips">
+                  <span class="op-chip">scene / token exact match</span>
+                  <span class="op-chip">location + category filters</span>
+                  <span class="op-chip">hybrid ranking</span>
                   <span class="op-chip">track search</span>
-                  <span class="op-chip">scene-based search</span>
                   <span class="op-chip">scene studio</span>
                   <span class="op-chip">review tasks</span>
                   <span class="op-chip">cohort exports</span>
@@ -1054,12 +1077,12 @@ def build_browser_home_html() -> str:
             <div class="obs-arrow"></div>
             <div class="obs-node">
               <div class="obs-name">Prometheus</div>
-              <div class="obs-sub">scrape and retain time-series metrics</div>
+              <div class="obs-sub">scrape and retain ingest, latency, and workflow metrics</div>
             </div>
             <div class="obs-arrow"></div>
             <div class="obs-node">
               <div class="obs-name">Grafana</div>
-              <div class="obs-sub">benchmark and telemetry dashboards</div>
+              <div class="obs-sub">backend comparison, observability, and query latency dashboards</div>
             </div>
             <div class="obs-arrow"></div>
             <div class="obs-node">
