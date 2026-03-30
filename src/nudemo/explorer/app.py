@@ -1645,6 +1645,39 @@ def build_explorer_html() -> str:
         align-items: center;
         margin-top: 16px;
       }
+      .search-loader {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: #111119;
+        border: 3px solid var(--line);
+        box-shadow: 4px 4px 0 #211b52;
+        margin-bottom: 14px;
+      }
+      .search-loader[hidden] {
+        display: none;
+      }
+      .spinner {
+        width: 16px;
+        height: 16px;
+        border-radius: 999px;
+        border: 2px solid rgba(231, 232, 243, 0.22);
+        border-top-color: var(--ink);
+        animation: spin 0.85s linear infinite;
+        flex: 0 0 auto;
+      }
+      .search-loader strong {
+        color: var(--ink);
+        font-size: 0.9rem;
+      }
+      .is-loading #results,
+      .is-loading #summary,
+      .is-loading #detail_panel {
+        opacity: 0.55;
+        transition: opacity 0.15s ease;
+      }
       .notice {
         padding: 12px 14px;
         border-radius: 16px;
@@ -1680,6 +1713,9 @@ def build_explorer_html() -> str:
         .camera-grid { grid-template-columns: 1fr; }
         .camera-compare { grid-template-columns: 1fr; }
         .scene-strip { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
       }
     </style>
   </head>
@@ -1753,6 +1789,13 @@ def build_explorer_html() -> str:
             </div>
             <span id="page_meta"></span>
           </div>
+          <div id="search_loader" class="search-loader" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            <div>
+              <strong>Searching corpus</strong>
+              <div>Fetching the latest results for your query and filters.</div>
+            </div>
+          </div>
           <div id="results" class="results-grid"></div>
           <div class="pagination">
             <button id="prev" class="secondary">Previous</button>
@@ -1799,6 +1842,7 @@ def build_explorer_html() -> str:
         summary: document.getElementById("summary"),
         topLocations: document.getElementById("top_locations"),
         topCategories: document.getElementById("top_categories"),
+        searchLoader: document.getElementById("search_loader"),
         results: document.getElementById("results"),
         resultMeta: document.getElementById("result_meta"),
         pageMeta: document.getElementById("page_meta"),
@@ -1814,6 +1858,25 @@ def build_explorer_html() -> str:
       function showNotice(message) {
         el.notice.hidden = !message;
         el.notice.textContent = message || "";
+      }
+
+      function setSearching(active) {
+        el.searchLoader.hidden = !active;
+        document.body.classList.toggle("is-loading", active);
+        el.apply.disabled = active;
+        el.reset.disabled = active;
+        el.prev.disabled = active || state.offset <= 0;
+        el.next.disabled = active || (state.offset + state.limit >= state.total && state.total > 0);
+        el.q.disabled = active;
+        el.scene.disabled = active;
+        el.location.disabled = active;
+        el.category.disabled = active;
+        el.minAnnotations.disabled = active;
+        el.limit.disabled = active;
+        if (active) {
+          el.resultMeta.textContent = "Searching...";
+          el.pageMeta.textContent = "…";
+        }
       }
 
       function paramsFromState() {
@@ -2157,11 +2220,14 @@ def build_explorer_html() -> str:
       async function refresh(resetOffset = false) {
         syncStateFromInputs();
         if (resetOffset) state.offset = 0;
+        setSearching(true);
         try {
           showNotice("");
           await Promise.all([loadSummary(), loadResults()]);
         } catch (error) {
           showNotice(error.message);
+        } finally {
+          setSearching(false);
         }
       }
 
