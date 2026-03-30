@@ -1748,14 +1748,6 @@ def build_explorer_html() -> str:
 
           <div class="results-head">
             <div>
-              <h2 style="margin-bottom: 4px;">Matching tracks</h2>
-              <span id="track_meta">Track search follows the same query and filters.</span>
-            </div>
-          </div>
-          <div id="track_results" class="results-grid"></div>
-
-          <div class="results-head">
-            <div>
               <h2 style="margin-bottom: 4px;">Loaded samples</h2>
               <span id="result_meta">Waiting for data...</span>
             </div>
@@ -1792,7 +1784,6 @@ def build_explorer_html() -> str:
         offset: Number(initialParams.get("offset") || 0),
         total: 0,
         currentResults: [],
-        currentTracks: [],
       };
 
       const el = {
@@ -1808,8 +1799,6 @@ def build_explorer_html() -> str:
         summary: document.getElementById("summary"),
         topLocations: document.getElementById("top_locations"),
         topCategories: document.getElementById("top_categories"),
-        trackResults: document.getElementById("track_results"),
-        trackMeta: document.getElementById("track_meta"),
         results: document.getElementById("results"),
         resultMeta: document.getElementById("result_meta"),
         pageMeta: document.getElementById("page_meta"),
@@ -1899,22 +1888,6 @@ def build_explorer_html() -> str:
         return cohort;
       }
 
-      async function createReviewTask(sourceType, sourceId, title, description = "") {
-        const payload = await requestJson("/api/tasks", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            source_type: sourceType,
-            source_id: sourceId,
-            title,
-            description,
-            priority: "normal",
-          }),
-        });
-        showNotice(`Created task ${payload.task_id}.`);
-        return payload;
-      }
-
       function renderSummary(summary) {
         const cards = [
           ["Samples", summary.sample_count ?? 0],
@@ -1971,59 +1944,6 @@ def build_explorer_html() -> str:
           pieces.push(`${String(row.scenes)} scenes`);
         }
         return pieces.join(" · ") || "scope unavailable";
-      }
-
-      function renderTrackResults(payload) {
-        state.currentTracks = payload.items || [];
-        const total = payload.total || 0;
-        el.trackMeta.textContent = total
-          ? `${total} matching tracks`
-          : "No track matches for the current query.";
-
-        if (!payload.items?.length) {
-          el.trackResults.innerHTML = `<section class="panel sample-card"><div class="body"><h3>No tracks match the current filters.</h3><div class="meta-list">Track search uses the same scene, location, and category filters as the sample search.</div></div></section>`;
-          return;
-        }
-
-        el.trackResults.innerHTML = payload.items.map((track) => `
-          <article class="panel sample-card" data-track="${track.track_id}">
-            ${track.preview_url ? `<img loading="lazy" src="${track.preview_url}" alt="Track ${track.track_id}">` : `<div style="aspect-ratio:16/9;background:#2a2938;"></div>`}
-            <div class="body">
-              <h3>${track.category} · ${track.scene_name}</h3>
-              <div class="meta-list">
-                <span><strong style="color:var(--ink);">Track</strong> <code>${track.track_id.slice(0, 12)}</code></span>
-                <span><strong style="color:var(--ink);">Location</strong> ${track.location}</span>
-                <span><strong style="color:var(--ink);">Samples</strong> ${track.sample_count}</span>
-                <span><strong style="color:var(--ink);">Annotations</strong> ${track.annotation_count}</span>
-              </div>
-              <div class="chip-row">
-                <span class="chip">${formatMetric(track.avg_num_lidar_pts, 0)} avg LiDAR pts</span>
-                <span class="chip">${formatMetric(track.avg_num_radar_pts, 0)} avg radar pts</span>
-              </div>
-              <div class="sample-actions">
-                <button class="secondary" data-open-track="${track.track_id}">Open track</button>
-                <button class="secondary" data-task-track="${track.track_id}" data-track-title="${track.category} review">Create task</button>
-              </div>
-            </div>
-          </article>
-        `).join("");
-
-        document.querySelectorAll("[data-open-track]").forEach((node) => {
-          node.addEventListener("click", (event) => {
-            event.stopPropagation();
-            window.location.href = `/scene-studio?track_id=${encodeURIComponent(node.dataset.openTrack)}`;
-          });
-        });
-        document.querySelectorAll("[data-task-track]").forEach((node) => {
-          node.addEventListener("click", async (event) => {
-            event.stopPropagation();
-            try {
-              await createReviewTask("track", node.dataset.taskTrack, node.dataset.trackTitle || "track review");
-            } catch (error) {
-              showNotice(error.message);
-            }
-          });
-        });
       }
 
       function renderResults(payload) {
@@ -2200,17 +2120,6 @@ def build_explorer_html() -> str:
         renderFilterOptions(filters);
       }
 
-      async function loadTracks() {
-        const params = new URLSearchParams();
-        if (state.q) params.set("q", state.q);
-        if (state.scene) params.set("scene_token", state.scene);
-        if (state.location) params.set("location", state.location);
-        if (state.category) params.set("category", state.category);
-        params.set("limit", String(Math.min(state.limit, 12)));
-        const payload = await requestJson(`/api/tracks/search?${params.toString()}`);
-        renderTrackResults(payload);
-      }
-
       async function loadResults() {
         let payload;
         if (isMiningActive()) {
@@ -2250,7 +2159,7 @@ def build_explorer_html() -> str:
         if (resetOffset) state.offset = 0;
         try {
           showNotice("");
-          await Promise.all([loadSummary(), loadTracks(), loadResults()]);
+          await Promise.all([loadSummary(), loadResults()]);
         } catch (error) {
           showNotice(error.message);
         }
