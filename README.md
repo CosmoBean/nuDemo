@@ -112,7 +112,10 @@ Track-aware review path:
 ```bash
 make test     # pytest
 make lint     # ruff
+make lint-pylint  # pylint
 make doctor   # runtime + dataset check
 ```
 
 Python 3.12 only.
+
+GitHub Actions now runs `pytest` and `pylint` on pushes to `main` and on pull requests through [python-ci.yml](/home/cosmobean/Desktop/code/nuDemo/.github/workflows/python-ci.yml).
