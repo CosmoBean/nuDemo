@@ -931,7 +931,7 @@ def build_browser_home_html() -> str:
         </section>
         <section class="card">
           <strong>Explorer</strong>
-          Search samples by scene, location, token, or category.
+          Search scenes and samples through the cleaned data pipeline and multimodal scene-search index.
           <a href="/explorer">Open</a>
         </section>
         <section class="card">
@@ -977,15 +977,16 @@ def build_browser_home_html() -> str:
             <div class="pipe-node">
               <div class="pipe-step">02</div>
               <div class="pipe-body">
-                <div class="pipe-name">Preprocessing</div>
-                <div class="pipe-sub">Per sample &nbsp;&middot;&nbsp; per sensor</div>
+                <div class="pipe-name">Clean Data Pipeline</div>
+                <div class="pipe-sub">Per sample &nbsp;&middot;&nbsp; normalized into a search-ready corpus</div>
                 <div class="op-chips">
+                  <span class="op-chip">sensor cleanup</span>
                   <span class="op-chip">JPEG encode</span>
                   <span class="op-chip">numpy pack</span>
                   <span class="op-chip">annotation parse</span>
-                  <span class="op-chip">scene walk</span>
+                  <span class="op-chip">scene grouping</span>
+                  <span class="op-chip">track materialize</span>
                   <span class="op-chip">token index</span>
-                  <span class="op-chip">embedding gen</span>
                 </div>
               </div>
             </div>
@@ -995,12 +996,22 @@ def build_browser_home_html() -> str:
             <div class="pipe-node">
               <div class="pipe-step">03</div>
               <div class="pipe-body">
-                <div class="pipe-name">Storage <span class="swap-badge">swappable</span></div>
+                <div class="pipe-name">Storage and ML Processing <span class="swap-badge">swappable</span></div>
+                <div class="pipe-sub">OmniTag-inspired scene search over cleaned multimodal samples</div>
                 <div class="backend-grid">
                   <span class="backend-pill">MinIO + PostgreSQL</span>
                   <span class="backend-pill">Lance</span>
                   <span class="backend-pill">Parquet</span>
                   <span class="backend-pill">WebDataset</span>
+                </div>
+                <div class="op-chips" style="margin-top:14px;">
+                  <span class="op-chip">OpenCLIP encode</span>
+                  <span class="op-chip">camera batch</span>
+                  <span class="op-chip">LiDAR BEV</span>
+                  <span class="op-chip">radar BEV</span>
+                  <span class="op-chip">metadata text</span>
+                  <span class="op-chip">fused vectors</span>
+                  <span class="op-chip">scene-search index</span>
                 </div>
                 <div class="cache-row">
                   <div class="cache-node">
@@ -1018,9 +1029,11 @@ def build_browser_home_html() -> str:
               <div class="pipe-step">04</div>
               <div class="pipe-body">
                 <div class="pipe-name">Search and review</div>
+                <div class="pipe-sub">Scene-aware retrieval, temporal review, and human-in-the-loop follow-up</div>
                 <div class="op-chips">
                   <span class="op-chip">sample search</span>
                   <span class="op-chip">track search</span>
+                  <span class="op-chip">scene-based search</span>
                   <span class="op-chip">scene studio</span>
                   <span class="op-chip">review tasks</span>
                   <span class="op-chip">cohort exports</span>
