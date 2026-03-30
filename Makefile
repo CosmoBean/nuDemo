@@ -1,5 +1,10 @@
 .DEFAULT_GOAL := help
 
+# Common overrides understood by the wrapper scripts in scripts/.
+# Example:
+#   make benchmark-real SCENE_LIMIT=200 BACKENDS="redis lance parquet" NUM_WORKERS="0 4"
+#   make storage BACKEND=minio-postgres LIMIT=1024
+
 UV ?= uv
 PYTHON ?= 3.12
 CONFIG ?=
@@ -10,8 +15,8 @@ RAW_ROOT ?= $(CURDIR)/data/raw/v1.0-trainval
 LIMIT ?=
 SCENE_LIMIT ?=
 BACKEND ?= lance
-MODE ?= metadata-only
 BACKENDS ?=
+MODE ?= metadata-only
 RESULTS ?= artifacts/reports/benchmark_report.json
 RUN_ID ?=
 NUM_RUNS ?= 1
@@ -33,37 +38,30 @@ MAX_FRAMES ?= 24
 FRAME_STEP ?= 1
 FPS ?= 2
 OUTPUT ?=
+COHORT_ID ?=
+TASK_ID ?=
+Q ?=
+SOURCE ?= elasticsearch
+STATUS ?=
+SOURCE_TYPE ?=
+SOURCE_ID ?=
+OFFSET ?=
 EXTRA_ARGS ?=
 NUSCENES_PROFILE ?= keyframes
 DOWNLOAD_MODE ?= all
 KEEP_ARCHIVES ?= 1
 DOCKER_COMPOSE ?= docker compose -f config/docker-compose.yml
+CREATE_TOPICS ?= 0
+APPEND ?= 0
+MATERIALIZE_ONLY ?= 0
+INDEX_ONLY ?= 0
 
-RUN_ENV_VARS := $(strip $(if $(DATASET_VERSION),NUDEMO_DATASET_VERSION=$(DATASET_VERSION)) $(if $(DATASET_ROOT),NUDEMO_DATASET_ROOT=$(DATASET_ROOT)))
-
-ifdef CONFIG
-CONFIG_ARGS := --config $(CONFIG)
-else
-CONFIG_ARGS :=
-endif
-
-ifdef LIMIT
-LIMIT_ARGS := --limit $(LIMIT)
-else
-LIMIT_ARGS :=
-endif
-
-ifdef SCENE_LIMIT
-SCENE_LIMIT_ARGS := --scene-limit $(SCENE_LIMIT)
-else
-SCENE_LIMIT_ARGS :=
-endif
-
-ifdef BACKENDS
-BACKENDS_ARGS := --backends $(BACKENDS)
-else
-BACKENDS_ARGS :=
-endif
+export UV PYTHON CONFIG PROVIDER DATASET_VERSION DATASET_ROOT RAW_ROOT LIMIT SCENE_LIMIT BACKEND \
+	BACKENDS MODE RESULTS RUN_ID NUM_RUNS RANDOM_SAMPLE_COUNT BATCH_SIZE STUDY_BATCH_SIZE \
+	SNAPSHOT_EVERY_BATCHES NUM_WORKERS REPORTS_HOST REPORTS_PORT REPORTS_ROOT EXPLORER_HOST \
+	EXPLORER_PORT EXPLORER_LIMIT SAMPLE_IDX SCENE_NAME CAMERA MAX_FRAMES FRAME_STEP FPS OUTPUT \
+	COHORT_ID TASK_ID Q SOURCE STATUS SOURCE_TYPE SOURCE_ID OFFSET EXTRA_ARGS NUSCENES_PROFILE \
+	DOWNLOAD_MODE KEEP_ARCHIVES DOCKER_COMPOSE CREATE_TOPICS APPEND MATERIALIZE_ONLY INDEX_ONLY
 
 .PHONY: help bootstrap bootstrap-legacy check-env deps doctor cli extract extract-synthetic \
 	kafka kafka-topics kafka-metadata kafka-full storage storage-minio-postgres storage-redis \
@@ -87,61 +85,61 @@ check-env: ## Validate local tooling and project config
 deps: infra-up ## Start all compose-backed project dependencies, including Prometheus and Grafana
 
 doctor: ## Inspect runtime, dataset visibility, and dataset counts
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) doctor
+	@$(UV) run --python $(PYTHON) nudemo $(if $(CONFIG),--config $(CONFIG),) doctor
 
 cli: ## Run an arbitrary nudemo CLI command via ARGS="..."
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) $(ARGS)
+	@$(UV) run --python $(PYTHON) nudemo $(if $(CONFIG),--config $(CONFIG),) $(ARGS)
 
 extract: ## Extract sample metadata from the configured provider
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) extract --provider $(PROVIDER) $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) $(EXTRA_ARGS)
+	@bash ./scripts/run_extract.sh $(EXTRA_ARGS)
 
 extract-synthetic: ## Extract one synthetic sample for smoke testing
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) extract --provider synthetic $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) $(EXTRA_ARGS)
+	@PROVIDER=synthetic bash ./scripts/run_extract.sh $(EXTRA_ARGS)
 
 kafka: ## Produce Kafka messages with MODE=metadata-only|full-payload
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) --mode $(MODE) $(EXTRA_ARGS)
+	@bash ./scripts/run_kafka.sh $(EXTRA_ARGS)
 
 kafka-topics: ## Create Kafka topics for the live pipeline
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) --create-topics $(EXTRA_ARGS)
+	@CREATE_TOPICS=1 bash ./scripts/run_kafka.sh $(EXTRA_ARGS)
 
 kafka-metadata: ## Produce metadata-only Kafka messages
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) --mode metadata-only $(EXTRA_ARGS)
+	@MODE=metadata-only bash ./scripts/run_kafka.sh $(EXTRA_ARGS)
 
 kafka-full: ## Produce full-payload Kafka benchmark messages
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) kafka --provider $(PROVIDER) $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) --mode full-payload $(EXTRA_ARGS)
+	@MODE=full-payload bash ./scripts/run_kafka.sh $(EXTRA_ARGS)
 
 storage: ## Write samples to one backend via BACKEND=minio-postgres|redis|lance|parquet|webdataset
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) storage $(BACKEND) --provider $(PROVIDER) $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) $(EXTRA_ARGS)
+	@bash ./scripts/run_storage.sh $(EXTRA_ARGS)
 
 storage-minio-postgres: ## Write samples to MinIO + PostgreSQL
-	@$(MAKE) storage BACKEND=minio-postgres PROVIDER=$(PROVIDER) LIMIT="$(LIMIT)" EXTRA_ARGS="$(EXTRA_ARGS)"
+	@BACKEND=minio-postgres bash ./scripts/run_storage.sh $(EXTRA_ARGS)
 
 storage-redis: ## Write samples to Redis
-	@$(MAKE) storage BACKEND=redis PROVIDER=$(PROVIDER) LIMIT="$(LIMIT)" EXTRA_ARGS="$(EXTRA_ARGS)"
+	@BACKEND=redis bash ./scripts/run_storage.sh $(EXTRA_ARGS)
 
 storage-lance: ## Write samples to Lance
-	@$(MAKE) storage BACKEND=lance PROVIDER=$(PROVIDER) LIMIT="$(LIMIT)" EXTRA_ARGS="$(EXTRA_ARGS)"
+	@BACKEND=lance bash ./scripts/run_storage.sh $(EXTRA_ARGS)
 
 storage-parquet: ## Write samples to Parquet
-	@$(MAKE) storage BACKEND=parquet PROVIDER=$(PROVIDER) LIMIT="$(LIMIT)" EXTRA_ARGS="$(EXTRA_ARGS)"
+	@BACKEND=parquet bash ./scripts/run_storage.sh $(EXTRA_ARGS)
 
 storage-webdataset: ## Write samples to WebDataset
-	@$(MAKE) storage BACKEND=webdataset PROVIDER=$(PROVIDER) LIMIT="$(LIMIT)" EXTRA_ARGS="$(EXTRA_ARGS)"
+	@BACKEND=webdataset bash ./scripts/run_storage.sh $(EXTRA_ARGS)
 
 benchmark-sim: ## Run the in-memory synthetic benchmark suite
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark run --simulate --provider synthetic $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) $(BACKENDS_ARGS) --num-runs $(NUM_RUNS) --random-sample-count $(RANDOM_SAMPLE_COUNT) --batch-size $(BATCH_SIZE) --num-workers $(NUM_WORKERS) $(EXTRA_ARGS)
+	@bash ./scripts/run_benchmark.sh sim $(EXTRA_ARGS)
 
 benchmark-real: ## Run live backend benchmarks against the configured provider
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark run --provider $(PROVIDER) $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) $(BACKENDS_ARGS) --num-runs $(NUM_RUNS) --random-sample-count $(RANDOM_SAMPLE_COUNT) --batch-size $(BATCH_SIZE) --num-workers $(NUM_WORKERS) $(EXTRA_ARGS)
+	@bash ./scripts/run_benchmark.sh real $(EXTRA_ARGS)
 
 dashboard: ## Render the benchmark dashboard from RESULTS=...
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) benchmark dashboard --results-path $(RESULTS)
+	@$(UV) run --python $(PYTHON) nudemo $(if $(CONFIG),--config $(CONFIG),) benchmark dashboard --results-path "$(RESULTS)"
 
 render-sample: ## Render a sample contact sheet to artifacts/reports/renders; use SAMPLE_IDX=<n>
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) render sample --provider $(PROVIDER) --sample-idx $(SAMPLE_IDX) $(if $(OUTPUT),--output $(OUTPUT),) $(EXTRA_ARGS)
+	@bash ./scripts/run_render.sh sample $(EXTRA_ARGS)
 
 render-scene: ## Render a scene GIF to artifacts/reports/renders; optional SCENE_NAME=... CAMERA=... MAX_FRAMES=... FRAME_STEP=... FPS=...
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) render scene $(if $(SCENE_NAME),--scene-name $(SCENE_NAME),) --camera $(CAMERA) --max-frames $(MAX_FRAMES) --step $(FRAME_STEP) --fps $(FPS) $(if $(OUTPUT),--output $(OUTPUT),) $(EXTRA_ARGS)
+	@bash ./scripts/run_render.sh scene $(EXTRA_ARGS)
 
 download-trainval: ## Download/extract official nuScenes v1.0-trainval keyframes from AWS Open Data
 	@NUSCENES_PROFILE="$(NUSCENES_PROFILE)" NUSCENES_MODE="$(DOWNLOAD_MODE)" NUSCENES_KEEP_ARCHIVES="$(KEEP_ARCHIVES)" \
@@ -152,25 +150,25 @@ download-trainval-full: ## Download/extract trainval keyframes plus sweep blobs;
 	@$(MAKE) download-trainval NUSCENES_PROFILE=full DOWNLOAD_MODE="$(DOWNLOAD_MODE)" KEEP_ARCHIVES="$(KEEP_ARCHIVES)" RAW_ROOT="$(RAW_ROOT)" DATASET_ROOT="$(DATASET_ROOT)"
 
 telemetry-runs: ## Show recent telemetry runs stored in PostgreSQL
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) telemetry runs --limit $(or $(LIMIT),10)
+	@bash ./scripts/run_telemetry.sh runs $(EXTRA_ARGS)
 
 multimodal-index: ## Build the multimodal Elasticsearch index from loaded samples
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) multimodal-index $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) --batch-size $(or $(BATCH_SIZE),24) $(EXTRA_ARGS)
+	@bash ./scripts/run_indexing.sh multimodal $(EXTRA_ARGS)
 
 track-index: ## Materialize track tables and index them into Elasticsearch
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) track-index $(LIMIT_ARGS) $(SCENE_LIMIT_ARGS) --batch-size $(or $(BATCH_SIZE),250) $(EXTRA_ARGS)
+	@bash ./scripts/run_indexing.sh track $(EXTRA_ARGS)
 
-track-search: ## Search materialized tracks; use EXTRA_ARGS for --q / --category / --source
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) track-search --limit $(or $(LIMIT),20) $(EXTRA_ARGS)
+track-search: ## Search materialized tracks; use Q=... CATEGORY=... SOURCE=... for tuning
+	@bash ./scripts/run_indexing.sh track-search $(EXTRA_ARGS)
 
-export-cohort: ## Export a saved cohort as Parquet; set COHORT_ID and optional TASK_ID via EXTRA_ARGS
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) export-cohort $(EXTRA_ARGS)
+export-cohort: ## Export a saved cohort as Parquet; set COHORT_ID and optional TASK_ID
+	@bash ./scripts/run_indexing.sh export-cohort $(EXTRA_ARGS)
 
 tasks: ## Operate on review tasks; pass EXTRA_ARGS like "list" or "create --title ..."
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) tasks $(EXTRA_ARGS)
+	@bash ./scripts/run_tasks.sh $(EXTRA_ARGS)
 
 telemetry-dashboard: ## Render telemetry dashboard from PostgreSQL; optional RUN_ID=<id>
-	@env $(RUN_ENV_VARS) $(UV) run --python $(PYTHON) nudemo $(CONFIG_ARGS) telemetry dashboard $(if $(RUN_ID),--run-id $(RUN_ID),--latest)
+	@bash ./scripts/run_telemetry.sh dashboard $(EXTRA_ARGS)
 
 reports-index: ## Render artifacts/reports/index.html for browser-friendly navigation
 	@python3 ./scripts/render_reports_index.py "$(REPORTS_ROOT)"
@@ -184,8 +182,8 @@ data-explorer: ## Serve the searchable ingested-data explorer
 	@NUDEMO_EXPLORER_HOST="$(EXPLORER_HOST)" NUDEMO_EXPLORER_PORT="$(EXPLORER_PORT)" NUDEMO_EXPLORER_LIMIT="$(EXPLORER_LIMIT)" \
 		bash ./scripts/serve_explorer.sh
 
-overnight-study: ## Run the sequential full-data batched ingest study; override EXTRA_ARGS or env vars for tuning
-	@env $(RUN_ENV_VARS) \
+overnight-study: ## Run the sequential full-data batched ingest study; override env vars for tuning
+	@env \
 		NUDEMO_STUDY_LIMIT="$(LIMIT)" \
 		NUDEMO_STUDY_SCENE_LIMIT="$(SCENE_LIMIT)" \
 		NUDEMO_STUDY_BACKENDS="$(BACKENDS)" \

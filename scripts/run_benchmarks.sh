@@ -3,4 +3,4 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-.venv/bin/nudemo benchmark run --provider real --limit 64 "$@"
+exec bash ./scripts/run_benchmark.sh real "$@"
