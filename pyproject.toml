@@ -54,6 +54,7 @@ dataset = [
 dev = [
   "pytest>=8.3,<9",
   "ruff>=0.11,<0.12",
+  "pylint>=3.3,<4",
   "httpx>=0.28,<1",
 ]
 
@@ -76,3 +77,21 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*.py" = ["E402", "E501"]
+
+[tool.pylint.main]
+py-version = "3.12"
+jobs = 0
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pylint.messages_control]
+disable = [
+  "C",
+  "R",
+  "import-error",
+  "broad-exception-caught",
+  "protected-access",
+  "no-member",
+  "global-statement",
+]

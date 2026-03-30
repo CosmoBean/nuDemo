@@ -1,0 +1,49 @@
+name: Python CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  pytest:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Sync test dependencies
+        run: uv sync --extra dataset --extra pipeline --extra reporting --extra dev
+
+      - name: Run pytest
+        run: uv run --python 3.12 pytest -q
+
+  pylint:
+    name: pylint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Sync lint dependencies
+        run: uv sync --extra dev
+
+      - name: Run pylint
+        run: bash ./scripts/run_pylint.sh src/nudemo

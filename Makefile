@@ -68,7 +68,7 @@ export UV PYTHON CONFIG PROVIDER DATASET_VERSION DATASET_ROOT RAW_ROOT LIMIT SCE
 	storage-lance storage-parquet storage-webdataset benchmark-sim benchmark-real dashboard render-sample \
 	render-scene download-trainval download-trainval-full telemetry-runs multimodal-index \
 	telemetry-dashboard reports-index serve-reports data-explorer track-index track-search \
-	export-cohort tasks lint test clean infra-up infra-down infra-ps infra-logs overnight-study
+	export-cohort tasks lint lint-pylint test clean infra-up infra-down infra-ps infra-logs overnight-study
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "%-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
@@ -195,6 +195,9 @@ overnight-study: ## Run the sequential full-data batched ingest study; override 
 
 lint: ## Run Ruff over src/ and tests/
 	@$(UV) run --python $(PYTHON) ruff check src tests
+
+lint-pylint: ## Run pylint over src/nudemo
+	@bash ./scripts/run_pylint.sh src/nudemo
 
 test: ## Run the test suite
 	@$(UV) run --python $(PYTHON) pytest
