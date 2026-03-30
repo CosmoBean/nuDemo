@@ -36,7 +36,7 @@ make track-index BATCH_SIZE=250
 
 # Search tracks or export a saved cohort manifest
 make track-search EXTRA_ARGS='--q pedestrian'
-make export-cohort EXTRA_ARGS='cohort_id_here'
+make export-cohort COHORT_ID='cohort_id_here'
 
 # Download nuScenes v1.0-trainval (~42 GB keyframes)
 make download-trainval
@@ -63,6 +63,8 @@ make data-explorer    # http://127.0.0.1:8788
 | `/open-grafana` | Grafana dashboards redirect |
 
 Requires the `minio-postgres` backend to be loaded. Multimodal search requires `make multimodal-index` after ingest. Track review requires `make track-index` after the sample corpus is loaded. Grafana at `http://127.0.0.1:3000/grafana/`.
+
+Most runtime tuning now lives in `scripts/`, not the `Makefile`. The intent is that `make` stays as a readable index of workflows while the bash wrappers carry the knobs for limits, workers, backends, and scene counts. If you want a machine-specific setup, copy one of the wrappers from [scripts/README.md](/home/cosmobean/Desktop/code/nuDemo/scripts/README.md) into your own script and change the defaults there.
 
 ## Architecture
 
