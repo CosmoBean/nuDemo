@@ -1737,8 +1737,8 @@ def build_explorer_html() -> str:
             <label for="q">Search</label>
             <input id="q" type="search" placeholder="scene-0001, token prefix, vehicle.car, singapore">
             <div style="font-size:.75rem;color:var(--muted);margin-top:4px;line-height:1.5">
-              Search scenes, scene tokens, sample tokens, locations, and annotation categories from one field.<br>
-              Examples: <code>scene-0001</code>, <code>73030fb67d3c</code>, <code>vehicle.car</code>, <code>singapore</code>
+              Search one field for scene names, token prefixes, locations, categories, and simple natural-language concepts.<br>
+              Try: <code>car</code>, <code>truck</code>, <code>human</code>, <code>tree</code>, <code>duck</code>, <code>scene-0001</code>, <code>73030fb67d3c</code>, <code>singapore</code>
             </div>
           </div>
           <div class="field">
