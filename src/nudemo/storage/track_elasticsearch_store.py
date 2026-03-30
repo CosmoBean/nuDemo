@@ -155,6 +155,7 @@ class TrackElasticsearchBackend:
         size: int = 20,
         from_: int = 0,
     ) -> dict[str, Any]:
+        self.ensure_index()
         normalized_q = q.strip()
         filters: list[dict[str, Any]] = []
         if scene_token:
@@ -238,6 +239,7 @@ class TrackElasticsearchBackend:
     def fetch_documents(self, track_ids: list[str]) -> list[dict[str, Any]]:
         if not track_ids:
             return []
+        self.ensure_index()
         result = self._req(
             "POST",
             "/_mget",
