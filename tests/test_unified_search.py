@@ -8,12 +8,13 @@ def test_build_explorer_html_uses_single_search_surface() -> None:
     html = build_explorer_html()
 
     assert 'label for="q">Search</label>' in html
-    assert "Search scenes, scene tokens, sample tokens, locations, and annotation categories from one field." in html
-    assert "Saved cohorts" in html
+    assert "Search one field for scene names, token prefixes, locations, categories, and simple natural-language concepts." in html
+    assert "Try: <code>car</code>, <code>truck</code>, <code>human</code>, <code>tree</code>, <code>duck</code>" in html
     assert "Mining workspace" not in html
     assert "Positive examples" not in html
     assert "Negative examples" not in html
-    assert "Saved cohorts" in html
+    assert "Saved cohorts" not in html
+    assert "Matching tracks" not in html
     assert 'id="es_status"' not in html
     assert 'id="es-results-section"' not in html
     assert "Annotation search" not in html
