@@ -958,10 +958,6 @@ def build_browser_home_html() -> str:
               <a href="/scene-studio">Open</a>
             </div>
             <div class="link-row">
-              <span>Review tasks</span>
-              <a href="/tasks">Open</a>
-            </div>
-            <div class="link-row">
               <span>Grafana observability</span>
               <a href="/open-grafana">Open</a>
             </div>
@@ -985,11 +981,6 @@ def build_browser_home_html() -> str:
           <strong>Scene Studio</strong>
           Step through a scene with a 3D LiDAR point-cloud viewer.
           <a href="/scene-studio">Open</a>
-        </section>
-        <section class="card">
-          <strong>Tasks</strong>
-          Create review queues from tracks and saved cohorts.
-          <a href="/tasks">Open</a>
         </section>
         <section class="card">
           <strong>Grafana</strong>
@@ -1097,15 +1088,14 @@ def build_browser_home_html() -> str:
             <div class="pipe-node">
               <div class="pipe-step">05</div>
               <div class="pipe-body">
-                <div class="pipe-name">Search and review</div>
-                <div class="pipe-sub">One search bar over lexical lookup, multimodal retrieval, tracks, cohorts, and review workflows</div>
+                <div class="pipe-name">Search and curation</div>
+                <div class="pipe-sub">One search bar over lexical lookup, multimodal retrieval, scene inspection, and export workflows</div>
                 <div class="op-chips">
                   <span class="op-chip">scene / token exact match</span>
                   <span class="op-chip">location + category filters</span>
                   <span class="op-chip">hybrid ranking</span>
                   <span class="op-chip">track search</span>
                   <span class="op-chip">scene studio</span>
-                  <span class="op-chip">review tasks</span>
                   <span class="op-chip">cohort exports</span>
                 </div>
               </div>
@@ -1771,7 +1761,6 @@ def build_explorer_html() -> str:
       <div class="subnav">
         <a href="/">Browser home</a>
         <a href="/scene-studio">Scene studio</a>
-        <a href="/tasks">Review tasks</a>
         <a href="/compare">Compare backends</a>
         <a href="/open-grafana">Grafana</a>
       </div>
@@ -3087,7 +3076,6 @@ def build_scene_studio_html() -> str:
         <a href="/">Browser home</a>
         <a href="/explorer">Explorer</a>
         <a href="/scene-studio">Scene studio</a>
-        <a href="/tasks">Review tasks</a>
         <a href="/open-grafana">Grafana</a>
       </div>
 
