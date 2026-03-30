@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from html import escape
 from pathlib import Path
@@ -62,6 +63,21 @@ SENSOR_COLUMN_MAP = {
     "RADAR_BACK_LEFT": "radar_back_left_path",
     "RADAR_BACK_RIGHT": "radar_back_right_path",
 }
+
+_HEX_IDENTIFIER_PATTERN = re.compile(r"^[0-9a-f]{6,32}$", re.IGNORECASE)
+_SCENE_IDENTIFIER_PATTERN = re.compile(r"^scene-\d{1,4}$", re.IGNORECASE)
+
+
+def _looks_like_structured_search_text(value: str) -> bool:
+    normalized = value.strip().lower()
+    if not normalized:
+        return False
+    return bool(
+        _HEX_IDENTIFIER_PATTERN.fullmatch(normalized)
+        or _SCENE_IDENTIFIER_PATTERN.fullmatch(normalized)
+        or "." in normalized
+        or "_" in normalized
+    )
 
 
 class ExplorerStore:
@@ -139,6 +155,37 @@ class ExplorerStore:
             scenes = [dict(row) for row in cursor.fetchall()]
 
         return {"locations": locations, "categories": categories, "scenes": scenes}
+
+    def prefers_structured_search(self, q: str | None) -> bool:
+        normalized = (q or "").strip().lower()
+        if not normalized:
+            return True
+        if _looks_like_structured_search_text(normalized):
+            return True
+        if len(normalized) < 4:
+            return False
+
+        with self._connection() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    EXISTS(
+                        SELECT 1
+                        FROM samples
+                        WHERE LOWER(location) LIKE %(pattern)s
+                        LIMIT 1
+                    ) AS location_match,
+                    EXISTS(
+                        SELECT 1
+                        FROM scenes
+                        WHERE LOWER(scene_name) LIKE %(pattern)s
+                        LIMIT 1
+                    ) AS scene_match
+                """,
+                {"pattern": f"%{normalized}%"},
+            )
+            row = dict(cursor.fetchone() or {})
+        return bool(row.get("location_match") or row.get("scene_match"))
 
     def search_samples(
         self,
@@ -1901,36 +1948,6 @@ def build_explorer_html() -> str:
         return response.json();
       }
 
-      function isMiningActive() {
-        return Boolean(state.q);
-      }
-
-      function currentFilters() {
-        return {
-          scene_token: state.scene,
-          location: state.location,
-          category: state.category,
-          min_annotations: state.minAnnotations,
-        };
-      }
-
-      function currentMiningPayload() {
-        return {
-          q: state.q,
-          scene_token: state.scene,
-          location: state.location,
-          category: state.category,
-          min_annotations: state.minAnnotations,
-          limit: state.limit,
-          offset: state.offset,
-          mode: "hybrid",
-          modality_preset: "balanced",
-          session_id: null,
-          positive_sample_ids: [],
-          negative_sample_ids: [],
-        };
-      }
-
       async function loadCohort(cohortId, options = {}) {
         const cohort = await requestJson(`/api/mining/cohorts/${encodeURIComponent(cohortId)}`);
         state.cohortId = cohort.cohort_id || cohortId;
@@ -2184,16 +2201,7 @@ def build_explorer_html() -> str:
       }
 
       async function loadResults() {
-        let payload;
-        if (isMiningActive()) {
-          payload = await requestJson("/api/mining/search", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(currentMiningPayload()),
-          });
-        } else {
-          payload = await requestJson(`/api/samples?${paramsFromState().toString()}`);
-        }
+        const payload = await requestJson(`/api/search?${paramsFromState().toString()}`);
         renderResults(payload);
       }
 
@@ -3994,6 +4002,89 @@ def create_app(
     app = FastAPI(title="nuDemo Browser", docs_url="/docs", redoc_url=None)
     install_http_metrics(app)
 
+    def _run_mining_search_response(
+        *,
+        q: str,
+        scene_token: str,
+        location: str,
+        category: str,
+        min_annotations: int,
+        limit: int,
+        offset: int,
+        mode: str = "hybrid",
+        modality_preset: str = "balanced",
+        modality_weights: dict[str, float] | None = None,
+        session_id: str = "",
+        positive_ids: list[int] | None = None,
+        negative_ids: list[int] | None = None,
+    ) -> dict[str, Any]:
+        positive_ids = [int(value) for value in (positive_ids or [])]
+        negative_ids = [int(value) for value in (negative_ids or [])]
+        effective_session_id = session_id.strip()
+        if effective_session_id and not positive_ids and not negative_ids:
+            try:
+                session = mining_store.get_session(effective_session_id)
+                positive_ids = [int(value) for value in session.get("positive_sample_ids") or []]
+                negative_ids = [int(value) for value in session.get("negative_sample_ids") or []]
+                if not q:
+                    q = str(session.get("query") or "").strip()
+                if not mode:
+                    mode = str(session.get("mode") or "hybrid")
+            except KeyError:
+                effective_session_id = ""
+
+        weights = resolve_modality_weights(
+            preset=modality_preset or "balanced",
+            overrides=modality_weights or {},
+        )
+        started = time.perf_counter()
+        mining_payload = mining_service.search(
+            q=q,
+            scene_token=scene_token,
+            location=location,
+            category=category,
+            min_annotations=min_annotations,
+            size=max(1, min(limit, 100)),
+            from_=max(0, offset),
+            mode=mode or "hybrid",
+            modality_weights=weights,
+            positive_sample_ids=positive_ids,
+            negative_sample_ids=negative_ids,
+        )
+
+        hit_map = {int(hit["sample_idx"]): hit for hit in mining_payload.get("hits", [])}
+        hydrated = store.fetch_samples_by_ids([int(hit["sample_idx"]) for hit in mining_payload.get("hits", [])])
+        items = []
+        for item in hydrated:
+            hit = hit_map.get(int(item["sample_idx"]), {})
+            enriched = dict(item)
+            enriched["match"] = {
+                "score": round(float(hit.get("score") or 0.0), 6),
+                "channels": [
+                    key
+                    for key, value in (hit.get("score_breakdown") or {}).items()
+                    if abs(float(value)) > 0.0001
+                ],
+                "breakdown": hit.get("score_breakdown") or {},
+                "dominant_signal": hit.get("dominant_signal") or "",
+            }
+            items.append(enriched)
+
+        latency_ms = (time.perf_counter() - started) * 1000.0
+        return {
+            "total": int(mining_payload.get("total") or 0),
+            "limit": limit,
+            "offset": offset,
+            "items": items,
+            "aggregations": mining_payload.get("aggs") or {},
+            "mining": {
+                **(mining_payload.get("meta") or {}),
+                "latency_ms": round(latency_ms, 3),
+                "session_id": effective_session_id or None,
+                "modality_preset": modality_preset or "balanced",
+            },
+        }
+
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:
         return {"status": "ok", "reports_root": str(config.runtime.reports_root)}
@@ -4458,77 +4549,69 @@ def create_app(
                 detail=f"Elasticsearch is not running at {config.services.elasticsearch.url}. Run: make deps",
             )
 
-        q = str(payload.get("q") or "").strip()
-        session_id = str(payload.get("session_id") or "").strip()
-        positive_ids = [int(value) for value in payload.get("positive_sample_ids") or []]
-        negative_ids = [int(value) for value in payload.get("negative_sample_ids") or []]
-        mode = str(payload.get("mode") or "hybrid")
-        if session_id and not positive_ids and not negative_ids:
-            try:
-                session = mining_store.get_session(session_id)
-                positive_ids = [int(value) for value in session.get("positive_sample_ids") or []]
-                negative_ids = [int(value) for value in session.get("negative_sample_ids") or []]
-                if not payload.get("q"):
-                    q = str(session.get("query") or "").strip()
-                if not payload.get("mode"):
-                    mode = str(session.get("mode") or "hybrid")
-            except KeyError:
-                session_id = ""
-
-        weights = resolve_modality_weights(
-            preset=str(payload.get("modality_preset") or "balanced"),
-            overrides=payload.get("modality_weights") or {},
-        )
-        started = time.perf_counter()
         try:
-            mining_payload = mining_service.search(
-                q=q,
+            return _run_mining_search_response(
+                q=str(payload.get("q") or "").strip(),
                 scene_token=str(payload.get("scene_token") or ""),
                 location=str(payload.get("location") or ""),
                 category=str(payload.get("category") or ""),
                 min_annotations=int(payload.get("min_annotations") or 0),
-                size=max(1, min(int(payload.get("limit") or default_limit), 100)),
-                from_=max(0, int(payload.get("offset") or 0)),
-                mode=mode,
-                modality_weights=weights,
-                positive_sample_ids=positive_ids,
-                negative_sample_ids=negative_ids,
+                limit=max(1, min(int(payload.get("limit") or default_limit), 100)),
+                offset=max(0, int(payload.get("offset") or 0)),
+                mode=str(payload.get("mode") or "hybrid"),
+                modality_preset=str(payload.get("modality_preset") or "balanced"),
+                modality_weights=payload.get("modality_weights") or {},
+                session_id=str(payload.get("session_id") or "").strip(),
+                positive_ids=[int(value) for value in payload.get("positive_sample_ids") or []],
+                negative_ids=[int(value) for value in payload.get("negative_sample_ids") or []],
             )
         except Exception as exc:  # pragma: no cover - depends on external services
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-        hit_map = {int(hit["sample_idx"]): hit for hit in mining_payload.get("hits", [])}
-        hydrated = store.fetch_samples_by_ids([int(hit["sample_idx"]) for hit in mining_payload.get("hits", [])])
-        items = []
-        for item in hydrated:
-            hit = hit_map.get(int(item["sample_idx"]), {})
-            enriched = dict(item)
-            enriched["match"] = {
-                "score": round(float(hit.get("score") or 0.0), 6),
-                "channels": [
-                    key
-                    for key, value in (hit.get("score_breakdown") or {}).items()
-                    if abs(float(value)) > 0.0001
-                ],
-                "breakdown": hit.get("score_breakdown") or {},
-                "dominant_signal": hit.get("dominant_signal") or "",
-            }
-            items.append(enriched)
-
-        latency_ms = (time.perf_counter() - started) * 1000.0
-        return {
-            "total": int(mining_payload.get("total") or 0),
-            "limit": int(payload.get("limit") or default_limit),
-            "offset": int(payload.get("offset") or 0),
-            "items": items,
-            "aggregations": mining_payload.get("aggs") or {},
-            "mining": {
-                **(mining_payload.get("meta") or {}),
-                "latency_ms": round(latency_ms, 3),
-                "session_id": session_id or None,
-                "modality_preset": str(payload.get("modality_preset") or "balanced"),
-            },
-        }
+    @app.get("/api/search")
+    def api_search(
+        q: str | None = None,
+        scene_token: str | None = None,
+        location: str | None = None,
+        category: str | None = None,
+        min_annotations: int = Query(default=0, ge=0),
+        limit: int = Query(default=default_limit, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
+        normalized_q = (q or "").strip()
+        try:
+            if not normalized_q or store.prefers_structured_search(normalized_q):
+                payload = store.search_samples(
+                    q=normalized_q or None,
+                    scene_token=scene_token,
+                    location=location,
+                    category=category,
+                    min_annotations=min_annotations,
+                    limit=limit,
+                    offset=offset,
+                )
+                payload["search"] = {"mode": "structured"}
+                return payload
+            if not es_store.is_available():
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Elasticsearch is not running at {config.services.elasticsearch.url}. Run: make deps",
+                )
+            payload = _run_mining_search_response(
+                q=normalized_q,
+                scene_token=scene_token or "",
+                location=location or "",
+                category=category or "",
+                min_annotations=min_annotations,
+                limit=limit,
+                offset=offset,
+            )
+            payload["search"] = {"mode": "hybrid"}
+            return payload
+        except HTTPException:
+            raise
+        except Exception as exc:  # pragma: no cover - depends on external services
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/api/samples")
     def api_samples(
@@ -4542,7 +4625,7 @@ def create_app(
     ) -> dict[str, Any]:
         try:
             normalized_q = (q or "").strip()
-            if normalized_q and es_store.is_available():
+            if normalized_q and es_store.is_available() and not store.prefers_structured_search(normalized_q):
                 es_payload = es_store.search(
                     q=normalized_q,
                     scene_token=scene_token or "",

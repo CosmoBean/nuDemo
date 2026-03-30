@@ -1,6 +1,6 @@
 import json
 
-from nudemo.explorer.app import build_explorer_html
+from nudemo.explorer.app import _looks_like_structured_search_text, build_explorer_html
 from nudemo.storage.elasticsearch_store import ElasticsearchBackend
 
 
@@ -15,9 +15,19 @@ def test_build_explorer_html_uses_single_search_surface() -> None:
     assert "Negative examples" not in html
     assert "Saved cohorts" not in html
     assert "Matching tracks" not in html
+    assert "/api/search?" in html
+    assert "/api/mining/search" not in html
     assert 'id="es_status"' not in html
     assert 'id="es-results-section"' not in html
     assert "Annotation search" not in html
+
+
+def test_structured_search_text_classifier_prefers_location_and_identifier_style_queries() -> None:
+    assert _looks_like_structured_search_text("scene-0001")
+    assert _looks_like_structured_search_text("73030fb67d3c")
+    assert _looks_like_structured_search_text("vehicle.car")
+    assert not _looks_like_structured_search_text("car")
+    assert not _looks_like_structured_search_text("duck")
 
 
 def test_elasticsearch_search_supports_scene_and_token_lookups(monkeypatch) -> None:
