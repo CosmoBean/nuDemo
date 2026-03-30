@@ -1735,15 +1735,6 @@ def build_explorer_html() -> str:
             <button id="reset" class="secondary">Reset</button>
           </div>
 
-          <section class="mining-panel">
-            <h2>Saved cohorts</h2>
-            <p>Save the current search and filter scope as a reusable review set for tasks, exports, and interviewer walkthroughs.</p>
-            <div class="button-row">
-              <button id="save_cohort" class="secondary">Save cohort</button>
-            </div>
-            <ul id="saved_cohorts" class="stack-list"></ul>
-          </section>
-
           <h2 style="margin-top: 24px;">Popular locations</h2>
           <ul id="top_locations" class="list"></ul>
 
@@ -1814,8 +1805,6 @@ def build_explorer_html() -> str:
         limit: document.getElementById("limit"),
         apply: document.getElementById("apply"),
         reset: document.getElementById("reset"),
-        saveCohort: document.getElementById("save_cohort"),
-        savedCohorts: document.getElementById("saved_cohorts"),
         summary: document.getElementById("summary"),
         topLocations: document.getElementById("top_locations"),
         topCategories: document.getElementById("top_categories"),
@@ -1890,30 +1879,6 @@ def build_explorer_html() -> str:
         };
       }
 
-      async function loadMiningOverview() {
-        const payload = await requestJson("/api/mining/overview");
-        renderMiningCollections(payload);
-      }
-
-      async function saveCohort() {
-        const name = window.prompt("Cohort name");
-        if (!name) return;
-        const sampleIds = (state.currentResults || []).map((sample) => sample.sample_idx);
-        const payload = await requestJson("/api/mining/cohorts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            session_id: null,
-            name,
-            query: state.q,
-            filters: currentFilters(),
-            sample_ids: sampleIds,
-          }),
-        });
-        showNotice(`Saved cohort ${payload.name}.`);
-        await loadMiningOverview();
-      }
-
       async function loadCohort(cohortId, options = {}) {
         const cohort = await requestJson(`/api/mining/cohorts/${encodeURIComponent(cohortId)}`);
         state.cohortId = cohort.cohort_id || cohortId;
@@ -1948,60 +1913,6 @@ def build_explorer_html() -> str:
         });
         showNotice(`Created task ${payload.task_id}.`);
         return payload;
-      }
-
-      async function exportCohort(cohortId) {
-        const payload = await requestJson(`/api/cohorts/${encodeURIComponent(cohortId)}/export`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        });
-        showNotice(`Exported cohort to ${payload.output_path || payload.export?.output_path || "artifact"}.`);
-      }
-
-      function renderMiningCollections(payload) {
-        const cohorts = payload.cohorts || [];
-
-        el.savedCohorts.innerHTML = cohorts.length ? cohorts.map((cohort) => `
-          <li>
-            <div>
-              <strong style="display:block;color:var(--ink);margin-bottom:6px;">${cohort.name}</strong>
-              <span>${(cohort.sample_ids || []).length} samples · ${cohort.query || "saved cohort"}</span>
-            </div>
-            <div style="display:grid;gap:8px;">
-              <button class="secondary" data-load-cohort="${cohort.cohort_id}">Load</button>
-              <button class="secondary" data-task-cohort="${cohort.cohort_id}" data-task-title="${cohort.name} review">Task</button>
-              <button class="secondary" data-export-cohort="${cohort.cohort_id}">Export</button>
-            </div>
-          </li>
-        `).join("") : `<li><span>No cohorts saved yet.</span></li>`;
-
-        document.querySelectorAll("[data-load-cohort]").forEach((node) => {
-          node.addEventListener("click", async () => {
-            await loadCohort(node.dataset.loadCohort);
-            await refresh(true);
-          });
-        });
-
-        document.querySelectorAll("[data-task-cohort]").forEach((node) => {
-          node.addEventListener("click", async () => {
-            try {
-              await createReviewTask("cohort", node.dataset.taskCohort, node.dataset.taskTitle || "cohort review");
-            } catch (error) {
-              showNotice(error.message);
-            }
-          });
-        });
-
-        document.querySelectorAll("[data-export-cohort]").forEach((node) => {
-          node.addEventListener("click", async () => {
-            try {
-              await exportCohort(node.dataset.exportCohort);
-            } catch (error) {
-              showNotice(error.message);
-            }
-          });
-        });
       }
 
       function renderSummary(summary) {
@@ -2339,7 +2250,7 @@ def build_explorer_html() -> str:
         if (resetOffset) state.offset = 0;
         try {
           showNotice("");
-          await Promise.all([loadSummary(), loadTracks(), loadResults(), loadMiningOverview()]);
+          await Promise.all([loadSummary(), loadTracks(), loadResults()]);
         } catch (error) {
           showNotice(error.message);
         }
@@ -2367,13 +2278,6 @@ def build_explorer_html() -> str:
       });
       el.q.addEventListener("keydown", (event) => {
         if (event.key === "Enter") refresh(true);
-      });
-      el.saveCohort.addEventListener("click", async () => {
-        try {
-          await saveCohort();
-        } catch (error) {
-          showNotice(error.message);
-        }
       });
 
       (async () => {
