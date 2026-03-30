@@ -1700,51 +1700,11 @@ def build_explorer_html() -> str:
           </div>
 
           <section class="mining-panel">
-            <h2>Mining workspace</h2>
-            <p>Keep the same search bar, then add positive and negative examples to turn lexical search into multimodal retrieval.</p>
-            <div class="field">
-              <label for="retrieval_mode">Retrieval mode</label>
-              <select id="retrieval_mode">
-                <option value="hybrid" selected>Hybrid</option>
-                <option value="example-driven">Example-driven</option>
-                <option value="lexical">Lexical only</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="modality_preset">Modality preset</label>
-              <select id="modality_preset">
-                <option value="balanced" selected>Balanced</option>
-                <option value="image-heavy">Image-heavy</option>
-                <option value="lidar-heavy">LiDAR-heavy</option>
-                <option value="metadata-heavy">Metadata-heavy</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="session_name">Session label</label>
-              <input id="session_name" type="text" placeholder="night pedestrians, parked cars, lane change">
-              <div class="subtle-copy">Create a reusable mining session before saving cohorts or walking an interviewer through examples.</div>
-            </div>
+            <h2>Saved cohorts</h2>
+            <p>Save the current search and filter scope as a reusable review set for tasks, exports, and interviewer walkthroughs.</p>
             <div class="button-row">
-              <button id="create_session" class="secondary">Create session</button>
               <button id="save_cohort" class="secondary">Save cohort</button>
             </div>
-            <div id="session_meta" class="mining-note">No active session. Search still works; examples stay local until you create one.</div>
-
-            <div class="example-stack">
-              <section class="example-box">
-                <strong>Positive examples</strong>
-                <div id="positive_examples" class="chip-row"></div>
-              </section>
-              <section class="example-box">
-                <strong>Negative examples</strong>
-                <div id="negative_examples" class="chip-row"></div>
-              </section>
-            </div>
-
-            <h3 style="margin-top: 20px;">Recent sessions</h3>
-            <ul id="recent_sessions" class="stack-list"></ul>
-
-            <h3 style="margin-top: 20px;">Saved cohorts</h3>
             <ul id="saved_cohorts" class="stack-list"></ul>
           </section>
 
@@ -1794,16 +1754,6 @@ def build_explorer_html() -> str:
 
     <script>
       const initialParams = new URLSearchParams(window.location.search);
-      const parseIds = (value) => (value || "")
-        .split(",")
-        .map((entry) => Number(entry.trim()))
-        .filter((entry) => Number.isInteger(entry) && entry >= 0);
-      const modalityPresets = {
-        balanced: "Balanced",
-        "image-heavy": "Image-heavy",
-        "lidar-heavy": "LiDAR-heavy",
-        "metadata-heavy": "Metadata-heavy",
-      };
       const state = {
         q: initialParams.get("q") || "",
         cohortId: initialParams.get("cohort_id") || "",
@@ -1814,12 +1764,6 @@ def build_explorer_html() -> str:
         limit: Number(initialParams.get("limit") || 24),
         offset: Number(initialParams.get("offset") || 0),
         total: 0,
-        retrievalMode: initialParams.get("retrieval_mode") || "hybrid",
-        modalityPreset: initialParams.get("modality_preset") || "balanced",
-        sessionId: initialParams.get("session_id") || "",
-        sessionName: "",
-        positiveIds: parseIds(initialParams.get("positive_ids")),
-        negativeIds: parseIds(initialParams.get("negative_ids")),
         currentResults: [],
         currentTracks: [],
       };
@@ -1834,15 +1778,7 @@ def build_explorer_html() -> str:
         limit: document.getElementById("limit"),
         apply: document.getElementById("apply"),
         reset: document.getElementById("reset"),
-        retrievalMode: document.getElementById("retrieval_mode"),
-        modalityPreset: document.getElementById("modality_preset"),
-        sessionName: document.getElementById("session_name"),
-        createSession: document.getElementById("create_session"),
         saveCohort: document.getElementById("save_cohort"),
-        sessionMeta: document.getElementById("session_meta"),
-        positiveExamples: document.getElementById("positive_examples"),
-        negativeExamples: document.getElementById("negative_examples"),
-        recentSessions: document.getElementById("recent_sessions"),
         savedCohorts: document.getElementById("saved_cohorts"),
         summary: document.getElementById("summary"),
         topLocations: document.getElementById("top_locations"),
@@ -1860,16 +1796,10 @@ def build_explorer_html() -> str:
       el.q.value = state.q;
       el.minAnnotations.value = String(state.minAnnotations);
       el.limit.value = String(state.limit);
-      el.retrievalMode.value = state.retrievalMode;
-      el.modalityPreset.value = state.modalityPreset;
 
       function showNotice(message) {
         el.notice.hidden = !message;
         el.notice.textContent = message || "";
-      }
-
-      function setSessionMeta(message) {
-        el.sessionMeta.textContent = message || "No active session. Search still works; examples stay local until you create one.";
       }
 
       function paramsFromState() {
@@ -1880,9 +1810,6 @@ def build_explorer_html() -> str:
         if (state.location) params.set("location", state.location);
         if (state.category) params.set("category", state.category);
         if (state.minAnnotations > 0) params.set("min_annotations", String(state.minAnnotations));
-        if (state.retrievalMode) params.set("retrieval_mode", state.retrievalMode);
-        if (state.modalityPreset) params.set("modality_preset", state.modalityPreset);
-        if (state.sessionId) params.set("session_id", state.sessionId);
         params.set("limit", String(state.limit));
         params.set("offset", String(state.offset));
         return params;
@@ -1898,15 +1825,7 @@ def build_explorer_html() -> str:
       }
 
       function isMiningActive() {
-        if (state.retrievalMode === "lexical") {
-          return false;
-        }
-        return Boolean(
-          state.q ||
-          state.positiveIds.length ||
-          state.negativeIds.length ||
-          state.retrievalMode === "example-driven"
-        );
+        return Boolean(state.q);
       }
 
       function currentFilters() {
@@ -1927,61 +1846,17 @@ def build_explorer_html() -> str:
           min_annotations: state.minAnnotations,
           limit: state.limit,
           offset: state.offset,
-          mode: state.retrievalMode,
-          modality_preset: state.modalityPreset,
-          session_id: state.sessionId || null,
-          positive_sample_ids: state.positiveIds,
-          negative_sample_ids: state.negativeIds,
+          mode: "hybrid",
+          modality_preset: "balanced",
+          session_id: null,
+          positive_sample_ids: [],
+          negative_sample_ids: [],
         };
       }
 
       async function loadMiningOverview() {
         const payload = await requestJson("/api/mining/overview");
         renderMiningCollections(payload);
-      }
-
-      async function createSession() {
-        const label = el.sessionName.value.trim() || `session-${new Date().toISOString().slice(11, 19)}`;
-        const payload = await requestJson("/api/mining/sessions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            label,
-            query: state.q,
-            mode: state.retrievalMode,
-            modality_preset: state.modalityPreset,
-          }),
-        });
-        state.sessionId = payload.session_id || "";
-        state.sessionName = payload.label || label;
-        el.sessionName.value = state.sessionName;
-        setSessionMeta(`Session ${state.sessionName} is active.`);
-        await syncSessionExamples();
-        await loadMiningOverview();
-      }
-
-      async function syncSessionExamples() {
-        if (!state.sessionId) {
-          setSessionMeta("No active session. Search still works; examples stay local until you create one.");
-          return;
-        }
-        const payload = await requestJson(`/api/mining/sessions/${encodeURIComponent(state.sessionId)}/examples`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            positive_sample_ids: state.positiveIds,
-            negative_sample_ids: state.negativeIds,
-            query: state.q,
-            mode: state.retrievalMode,
-            modality_preset: state.modalityPreset,
-            filters: currentFilters(),
-          }),
-        });
-        setSessionMeta(
-          `Session ${payload.label || state.sessionName || state.sessionId} · `
-          + `${(payload.positive_sample_ids || []).length} positives · `
-          + `${(payload.negative_sample_ids || []).length} negatives`
-        );
       }
 
       async function saveCohort() {
@@ -1992,7 +1867,7 @@ def build_explorer_html() -> str:
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            session_id: state.sessionId || null,
+            session_id: null,
             name,
             query: state.q,
             filters: currentFilters(),
@@ -2017,12 +1892,6 @@ def build_explorer_html() -> str:
         el.location.value = state.location;
         el.category.value = state.category;
         el.minAnnotations.value = String(state.minAnnotations);
-        const sampleIds = cohort.sample_ids || [];
-        state.positiveIds = sampleIds.length
-          ? sampleIds.slice(0, Math.min(sampleIds.length, 8))
-          : [];
-        state.negativeIds = [];
-        renderExampleChips();
         if (options.notice !== false) {
           showNotice(`Loaded cohort ${cohort.name}.`);
         }
@@ -2054,64 +1923,8 @@ def build_explorer_html() -> str:
         showNotice(`Exported cohort to ${payload.output_path || payload.export?.output_path || "artifact"}.`);
       }
 
-      async function markExample(sampleIdx, polarity) {
-        const targetKey = polarity === "positive" ? "positiveIds" : "negativeIds";
-        const oppositeKey = polarity === "positive" ? "negativeIds" : "positiveIds";
-        state[oppositeKey] = state[oppositeKey].filter((value) => value !== sampleIdx);
-        if (state[targetKey].includes(sampleIdx)) {
-          state[targetKey] = state[targetKey].filter((value) => value !== sampleIdx);
-        } else {
-          state[targetKey] = [...state[targetKey], sampleIdx];
-        }
-        renderExampleChips();
-        await syncSessionExamples();
-        await refresh(true);
-      }
-
-      window.markExample = markExample;
-
-      function renderExampleChips() {
-        const renderChip = (sampleIdx, polarity) => `
-          <span class="chip action ${polarity}" data-remove-example="${sampleIdx}" data-polarity="${polarity}">
-            ${polarity === "positive" ? "+" : "−"} sample ${sampleIdx}
-          </span>
-        `;
-        el.positiveExamples.innerHTML = state.positiveIds.length
-          ? state.positiveIds.map((sampleIdx) => renderChip(sampleIdx, "positive")).join("")
-          : `<span class="subtle-copy">No positives yet.</span>`;
-        el.negativeExamples.innerHTML = state.negativeIds.length
-          ? state.negativeIds.map((sampleIdx) => renderChip(sampleIdx, "negative")).join("")
-          : `<span class="subtle-copy">No negatives yet.</span>`;
-
-        document.querySelectorAll("[data-remove-example]").forEach((node) => {
-          node.addEventListener("click", async () => {
-            const sampleIdx = Number(node.dataset.removeExample);
-            const polarity = node.dataset.polarity;
-            if (polarity === "positive") {
-              state.positiveIds = state.positiveIds.filter((value) => value !== sampleIdx);
-            } else {
-              state.negativeIds = state.negativeIds.filter((value) => value !== sampleIdx);
-            }
-            renderExampleChips();
-            await syncSessionExamples();
-            await refresh(true);
-          });
-        });
-      }
-
       function renderMiningCollections(payload) {
-        const sessions = payload.sessions || [];
         const cohorts = payload.cohorts || [];
-
-        el.recentSessions.innerHTML = sessions.length ? sessions.map((session) => `
-          <li>
-            <div>
-              <strong style="display:block;color:var(--ink);margin-bottom:6px;">${session.label || session.session_id}</strong>
-              <span>${session.mode} · ${session.positive_count || 0} positives · ${session.negative_count || 0} negatives</span>
-            </div>
-            <button class="secondary" data-load-session="${session.session_id}">Load</button>
-          </li>
-        `).join("") : `<li><span>No saved sessions yet.</span></li>`;
 
         el.savedCohorts.innerHTML = cohorts.length ? cohorts.map((cohort) => `
           <li>
@@ -2126,27 +1939,6 @@ def build_explorer_html() -> str:
             </div>
           </li>
         `).join("") : `<li><span>No cohorts saved yet.</span></li>`;
-
-        document.querySelectorAll("[data-load-session]").forEach((node) => {
-          node.addEventListener("click", async () => {
-            const payload = await requestJson(`/api/mining/sessions/${encodeURIComponent(node.dataset.loadSession)}`);
-            state.cohortId = "";
-            state.sessionId = payload.session_id || "";
-            state.sessionName = payload.label || "";
-            state.q = payload.query || "";
-            state.retrievalMode = payload.mode || "hybrid";
-            state.positiveIds = payload.positive_sample_ids || [];
-            state.negativeIds = payload.negative_sample_ids || [];
-            state.modalityPreset = payload.modality_preset || "balanced";
-            el.sessionName.value = state.sessionName;
-            el.q.value = state.q;
-            el.retrievalMode.value = state.retrievalMode;
-            el.modalityPreset.value = state.modalityPreset;
-            setSessionMeta(`Session ${state.sessionName || state.sessionId} loaded.`);
-            renderExampleChips();
-            await refresh(true);
-          });
-        });
 
         document.querySelectorAll("[data-load-cohort]").forEach((node) => {
           node.addEventListener("click", async () => {
@@ -2330,22 +2122,12 @@ def build_explorer_html() -> str:
                   </div>
                 </div>
               ` : ""}
-              <div class="sample-actions">
-                <button class="secondary" data-example="positive" data-sample="${sample.sample_idx}">+ positive</button>
-                <button class="secondary" data-example="negative" data-sample="${sample.sample_idx}">− negative</button>
-              </div>
             </div>
           </article>
         `).join("");
 
         document.querySelectorAll(".sample-card[data-sample]").forEach((node) => {
           node.addEventListener("click", () => loadDetail(node.dataset.sample));
-        });
-        document.querySelectorAll("[data-example]").forEach((node) => {
-          node.addEventListener("click", async (event) => {
-            event.stopPropagation();
-            await markExample(Number(node.dataset.sample), node.dataset.example);
-          });
         });
       }
 
@@ -2398,8 +2180,6 @@ def build_explorer_html() -> str:
           ${matchBreakdown}
           <div class="button-row" style="margin-top:14px;">
             <button class="secondary" onclick="window.location.href='/scene-studio?scene_token=${encodeURIComponent(sample.scene_token)}&sample_idx=${sample.sample_idx}'">Open scene studio</button>
-            <button class="secondary" onclick="window.markExample(${sample.sample_idx}, 'positive')">Use as positive</button>
-            <button class="secondary" onclick="window.markExample(${sample.sample_idx}, 'negative')">Use as negative</button>
           </div>
 
           <h3 style="margin-top:18px;">Scene strip</h3>
@@ -2516,9 +2296,6 @@ def build_explorer_html() -> str:
         state.category = el.category.value;
         state.minAnnotations = Number(el.minAnnotations.value || 0);
         state.limit = Number(el.limit.value || 24);
-        state.retrievalMode = el.retrievalMode.value;
-        state.modalityPreset = el.modalityPreset.value;
-        state.sessionName = el.sessionName.value.trim();
       }
 
       async function refresh(resetOffset = false) {
@@ -2540,13 +2317,8 @@ def build_explorer_html() -> str:
         el.category.value = "";
         el.minAnnotations.value = "0";
         el.limit.value = "24";
-        el.retrievalMode.value = "hybrid";
-        el.modalityPreset.value = "balanced";
         state.cohortId = "";
-        state.positiveIds = [];
-        state.negativeIds = [];
         state.offset = 0;
-        renderExampleChips();
         await refresh(true);
       });
       el.prev.addEventListener("click", async () => {
@@ -2560,13 +2332,6 @@ def build_explorer_html() -> str:
       el.q.addEventListener("keydown", (event) => {
         if (event.key === "Enter") refresh(true);
       });
-      el.createSession.addEventListener("click", async () => {
-        try {
-          await createSession();
-        } catch (error) {
-          showNotice(error.message);
-        }
-      });
       el.saveCohort.addEventListener("click", async () => {
         try {
           await saveCohort();
@@ -2578,10 +2343,6 @@ def build_explorer_html() -> str:
       (async () => {
         try {
           await loadFilters();
-          renderExampleChips();
-          if (state.sessionId) {
-            setSessionMeta(`Session ${state.sessionId} loaded from URL.`);
-          }
           if (state.cohortId) {
             await loadCohort(state.cohortId, { notice: false });
           }
