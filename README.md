@@ -119,3 +119,13 @@ make doctor   # runtime + dataset check
 Python 3.12 only.
 
 GitHub Actions now runs `pytest` and `pylint` on pushes to `main` and on pull requests through [python-ci.yml](/home/cosmobean/Desktop/code/nuDemo/.github/workflows/python-ci.yml).
+
+## March 31 Closeout
+
+This repository closes its March 31, 2026 milestone with the core data-engineering, retrieval, and review workflows in place:
+- real `nuScenes v1.0-trainval` backend benchmarking
+- browser-based scene search, LiDAR review, and backend comparison
+- OmniTag-inspired multimodal indexing for scene-aware search
+- track materialization, cohort export, and review-task workflow support
+
+Thanks for building and reviewing `nuDemo`.
